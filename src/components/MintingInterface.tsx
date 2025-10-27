@@ -1113,7 +1113,7 @@ export default function MintingInterface() {
 
                       {/* NFT Grid/List */}
                       {nftViewMode === "grid" ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 [@media(min-width:1540px)]:grid-cols-3 gap-4 items-stretch overflow-y-auto pt-6 -mt-4 max-h-[700px]">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 [@media(min-width:1540px)]:grid-cols-3 gap-4 items-stretch overflow-y-auto pt-6 -mt-4 max-h-[800px]">
                           {getFilteredNFTs().map(
                             (asset: any, index: number) => (
                               <NFTCard
