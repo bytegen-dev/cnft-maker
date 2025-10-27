@@ -7,7 +7,7 @@ A comprehensive Next.js application for minting, managing, and burning Cardano N
 ### NFT Management
 
 - **Mint NFTs** - Create new collections or add to existing ones
-- **Burn NFTs** - Permanently destroy NFTs you own
+- **Burn NFTs** - Permanently destroy NFTs you own with proper validation
 - **NFT Gallery** - View all your NFTs with images and metadata
 - **Collection Management** - Save and manage multiple collections
 - **Policy Script Management** - Download and upload policy scripts
@@ -15,9 +15,11 @@ A comprehensive Next.js application for minting, managing, and burning Cardano N
 ### Advanced Features
 
 - **Dynamic Metadata Editor** - Edit JSON metadata with Monaco Editor
+- **Flexible Metadata** - Support for custom metadata structures (socials, attributes, etc.)
 - **IPFS Integration** - Upload images to Pinata IPFS
 - **Custom Recipients** - Send NFTs to specific addresses
 - **Time-locked Policies** - Create time-locked or signature-only policies
+- **Network-aware Operations** - Automatic preprod/mainnet detection
 - **Search & Filter** - Find NFTs by collection, policy ID, or metadata
 - **Persistent UI** - Collapsible sections with localStorage persistence
 
@@ -28,6 +30,8 @@ A comprehensive Next.js application for minting, managing, and burning Cardano N
 - **Real-time Updates** - Live wallet balance and transaction status
 - **Error Handling** - Comprehensive error messages and validation
 - **Copy Functionality** - Easy copying of addresses and transaction hashes
+- **Wallet Persistence** - Auto-reconnect to saved wallet on page load
+- **Network Indicators** - Clear visual indicators for preprod/mainnet
 
 ## Quick Start
 
@@ -66,6 +70,24 @@ Open [http://localhost:3000](http://localhost:3000) to see the application.
 - **Editor**: Monaco Editor
 - **Storage**: IPFS (Pinata)
 - **Fonts**: Custom Google Fonts (Bitcount Grid Single, Boldonse)
+
+## Recent Updates
+
+### v2.1.0 - Network Tracking & Burn Fixes
+- ✅ **Network-aware Policy Scripts** - Policy scripts now track preprod/mainnet
+- ✅ **Automatic Network Detection** - Uses correct Blockfrost API keys based on wallet network
+- ✅ **Burn Transaction Fixes** - Resolved UTXO balance and asset name encoding issues
+- ✅ **Flexible Metadata Support** - Support for custom metadata structures
+- ✅ **Enhanced Error Handling** - Better error messages for burn operations
+- ✅ **Wallet Persistence** - Auto-reconnect to saved wallet on page load
+- ✅ **UI Improvements** - Network indicators, persistent settings, better UX
+
+### v2.0.0 - Browser Wallet Integration
+- ✅ **Browser Wallet Support** - Connect with Nami, Eternl, Flint, etc.
+- ✅ **Mesh React Hooks** - Modern wallet integration
+- ✅ **Real-time Balance** - Live ADA balance and price display
+- ✅ **NFT Gallery** - Grid/list view with search and filtering
+- ✅ **Policy Script Management** - Upload/download policy scripts
 
 ## Project Structure
 
