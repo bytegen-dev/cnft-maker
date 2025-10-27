@@ -46,9 +46,11 @@ import {
 import {
   mintNFTs,
   getSavedPolicies,
+  getSavedPoliciesForNetwork,
   mintToExistingCollection,
   burnNFT,
   hasPolicyScript,
+  hasPolicyScriptForNetwork,
 } from "@/lib/minting";
 import {
   useWallet,
@@ -237,9 +239,13 @@ export default function MintingInterface() {
 
     setIsLoadingMetadata(true);
     try {
-      const provider = new BlockfrostProvider(
-        process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY || ""
-      );
+      // Use appropriate Blockfrost API key based on network
+      const blockfrostKey =
+        network === 0
+          ? process.env.NEXT_PUBLIC_PREPROD_BLOCKFROST_API_KEY
+          : process.env.NEXT_PUBLIC_MAINNET_BLOCKFROST_API_KEY;
+
+      const provider = new BlockfrostProvider(blockfrostKey || "");
 
       const enhancedAssets = await Promise.all(
         assets.map(async (asset: any) => {
@@ -478,7 +484,8 @@ export default function MintingInterface() {
           parsedMetadata,
           recipientsToUse,
           useTimeLock,
-          timeLockEpochs
+          timeLockEpochs,
+          network
         );
       } else {
         if (!selectedPolicy) {
@@ -494,7 +501,8 @@ export default function MintingInterface() {
           collectionName,
           parsedMetadata,
           recipientsToUse,
-          timeLockEpochs
+          timeLockEpochs,
+          network
         );
       }
 
@@ -533,8 +541,12 @@ export default function MintingInterface() {
   };
 
   const loadSavedPolicies = () => {
-    const policies = getSavedPolicies();
-    console.log("Loading saved policies:", policies);
+    // Filter policies by current network
+    const policies = getSavedPoliciesForNetwork(network || 0);
+    console.log(
+      `Loading saved policies for network ${network || 0}:`,
+      policies
+    );
     // Filter out duplicate collections, keeping the first occurrence
     const uniquePolicies = policies.filter(
       (policy: any, index: number, self: any[]) =>
@@ -631,7 +643,8 @@ export default function MintingInterface() {
         wallet,
         asset.policyId,
         asset.assetName,
-        asset.quantity
+        asset.quantity,
+        network
       );
       setBurnResult(result);
     } catch (error) {
@@ -1109,7 +1122,8 @@ export default function MintingInterface() {
                                   setNftDetailsDialogOpen(true);
                                   console.log(nft);
                                 }}
-                                hasPolicyScript={hasPolicyScript}
+                                hasPolicyScript={hasPolicyScriptForNetwork}
+                                network={network || 0}
                                 burnDialogOpen={burnDialogOpen}
                                 setBurnDialogOpen={setBurnDialogOpen}
                                 selectedAsset={selectedAsset}
@@ -1176,7 +1190,10 @@ export default function MintingInterface() {
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  {hasPolicyScript(asset.policyId) ? (
+                                  {hasPolicyScriptForNetwork(
+                                    asset.policyId,
+                                    network || 0
+                                  ) ? (
                                     <Button
                                       variant="outline"
                                       size="sm"
@@ -1818,9 +1835,14 @@ export default function MintingInterface() {
                         <CardContent className="p-4">
                           <div className="space-y-4">
                             <div className="flex items-center gap-2 justify-between">
-                              <h3 className="font-semibold truncate">
-                                {policy.collectionName}
-                              </h3>
+                              <div className="flex items-center gap-2">
+                                <h3 className="font-semibold truncate max-w-[200px]">
+                                  {policy.collectionName}
+                                </h3>
+                                <Badge variant="outline">
+                                  {policy.network === 0 ? "Preprod" : "Mainnet"}
+                                </Badge>
+                              </div>
                               <div className="flex items-center gap-2">
                                 <Button
                                   variant="outline"
@@ -1937,7 +1959,8 @@ export default function MintingInterface() {
             setNftDetailsDialogOpen(false);
             setSelectedNft(null);
           }}
-          hasPolicyScript={hasPolicyScript}
+          hasPolicyScript={hasPolicyScriptForNetwork}
+          network={network || 0}
           burnDialogOpen={burnDialogOpen}
           setBurnDialogOpen={setBurnDialogOpen}
           selectedAsset={selectedAsset}

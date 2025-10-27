@@ -17,7 +17,8 @@ interface NFTDetailsDialogProps {
   onOpenChange: (open: boolean) => void;
   selectedNft: any;
   onClose: () => void;
-  hasPolicyScript: (policyId: string) => boolean;
+  hasPolicyScript: (policyId: string, network: number) => boolean;
+  network: number;
   burnDialogOpen: boolean;
   setBurnDialogOpen: (open: boolean) => void;
   selectedAsset: any;
@@ -36,6 +37,7 @@ export function NFTDetailsDialog({
   selectedNft,
   onClose,
   hasPolicyScript,
+  network,
   burnDialogOpen,
   setBurnDialogOpen,
   selectedAsset,
@@ -190,7 +192,7 @@ export function NFTDetailsDialog({
 
             {/* Burn Button */}
             <div className="pt-4 border-t">
-              {hasPolicyScript(selectedNft.policyId) ? (
+              {hasPolicyScript(selectedNft.policyId, network) ? (
                 <BurnDialog
                   isOpen={
                     burnDialogOpen &&

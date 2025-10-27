@@ -7,7 +7,8 @@ import { BurnDialog } from "./BurnDialog";
 interface NFTCardProps {
   nft: any;
   onCardClick: (nft: any) => void;
-  hasPolicyScript: (policyId: string) => boolean;
+  hasPolicyScript: (policyId: string, network: number) => boolean;
+  network: number;
   burnDialogOpen: boolean;
   setBurnDialogOpen: (open: boolean) => void;
   selectedAsset: any;
@@ -24,6 +25,7 @@ export function NFTCard({
   nft,
   onCardClick,
   hasPolicyScript,
+  network,
   burnDialogOpen,
   setBurnDialogOpen,
   selectedAsset,
@@ -111,7 +113,7 @@ export function NFTCard({
             View Details
           </Button>
 
-          {hasPolicyScript(nft.policyId) && (
+          {hasPolicyScript(nft.policyId, network) && (
             <BurnDialog
               isOpen={
                 burnDialogOpen && selectedAsset?.assetName === nft.assetName

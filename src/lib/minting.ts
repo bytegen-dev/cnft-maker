@@ -11,8 +11,13 @@ import { getDefaultMetadata } from "./metadata";
 import { getDefaultRecipients, createRecipients } from "./recipients";
 
 const networkId = 0; // 0 for testnet, 1 for mainnet
-const blockfrostKey =
-  process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY || "BLOCKFROST_KEY_HERE";
+
+// Function to get the appropriate Blockfrost API key based on network
+const getBlockfrostKey = (network: number): string => {
+  return network === 0
+    ? process.env.NEXT_PUBLIC_PREPROD_BLOCKFROST_API_KEY || ""
+    : process.env.NEXT_PUBLIC_MAINNET_BLOCKFROST_API_KEY || "";
+};
 
 // Function to get a safe future slot number
 const getFutureSlot = async (
@@ -79,10 +84,12 @@ export async function mintNFTs(
   customMetadata?: any,
   customRecipients?: string[],
   useTimeLock: boolean = true,
-  timeLockEpochs: number = 10
+  timeLockEpochs: number = 10,
+  network: number = 0
 ) {
   try {
-    // Initialize blockchain provider
+    // Initialize blockchain provider with appropriate API key
+    const blockfrostKey = getBlockfrostKey(network);
     const provider = new BlockfrostProvider(blockfrostKey);
 
     const address = await wallet.getChangeAddress();
@@ -180,6 +187,7 @@ export async function mintNFTs(
       collectionName: collectionName || "Default Collection",
       nativeScript,
       forgeScript: forgeScript.toString(),
+      network,
       createdAt: new Date().toISOString(),
       txHash,
     };
@@ -276,6 +284,46 @@ export function hasPolicyScript(policyId: string): boolean {
   return savedPolicies.some((policy: any) => policy.policyId === policyId);
 }
 
+// Function to check if a policy script exists for a given policy ID and network
+export function hasPolicyScriptForNetwork(
+  policyId: string,
+  network: number
+): boolean {
+  const savedPolicies = getSavedPolicies();
+  return savedPolicies.some(
+    (policy: any) => policy.policyId === policyId && policy.network === network
+  );
+}
+
+// Function to get policy scripts filtered by network
+export function getSavedPoliciesForNetwork(network: number): any[] {
+  const savedPolicies = getSavedPolicies();
+  return savedPolicies.filter((policy: any) => policy.network === network);
+}
+
+// Function to validate network compatibility for policy operations
+export function validateNetworkCompatibility(
+  policyId: string,
+  currentNetwork: number
+): boolean {
+  const savedPolicies = getSavedPolicies();
+  const policy = savedPolicies.find((p: any) => p.policyId === policyId);
+
+  if (!policy) {
+    return false; // Policy not found
+  }
+
+  // If policy doesn't have network field (legacy), assume it's compatible
+  if (policy.network === undefined) {
+    console.warn(
+      `Policy ${policyId} is missing network information (legacy policy)`
+    );
+    return true;
+  }
+
+  return policy.network === currentNetwork;
+}
+
 // Function to mint to existing collection
 export async function mintToExistingCollection(
   wallet: IWallet,
@@ -283,10 +331,11 @@ export async function mintToExistingCollection(
   collectionName: string,
   customMetadata?: any,
   customRecipients?: string[],
-  timeLockEpochs: number = 10
+  timeLockEpochs: number = 10,
+  network: number = 0
 ) {
   try {
-    // Get saved policies
+    // Get saved policies first
     const savedPolicies = getSavedPolicies();
     const existingPolicy = savedPolicies.find(
       (p: any) => p.policyId === policyId
@@ -296,7 +345,18 @@ export async function mintToExistingCollection(
       throw new Error("Policy not found in saved collections");
     }
 
-    // Initialize blockchain provider
+    // Validate network compatibility
+    if (!validateNetworkCompatibility(policyId, network)) {
+      const policyNetwork =
+        existingPolicy.network === 0 ? "Preprod" : "Mainnet";
+      const currentNetwork = network === 0 ? "Preprod" : "Mainnet";
+      throw new Error(
+        `Policy script is not compatible with current network. Policy was created for ${policyNetwork}, but current network is ${currentNetwork}.`
+      );
+    }
+
+    // Initialize blockchain provider with appropriate API key
+    const blockfrostKey = getBlockfrostKey(network);
     const provider = new BlockfrostProvider(blockfrostKey);
 
     const address = await wallet.getChangeAddress();
@@ -430,18 +490,29 @@ export async function burnNFT(
   wallet: IWallet,
   policyId: string,
   assetName: string,
-  quantity: string = "1"
+  quantity: string = "1",
+  network: number = 0
 ) {
   try {
-    // Initialize blockchain provider
+    // Try to find the saved policy script for this policy ID first
+    const savedPolicies = getSavedPolicies();
+    const savedPolicy = savedPolicies.find((p: any) => p.policyId === policyId);
+
+    // Validate network compatibility if policy exists
+    if (savedPolicy && !validateNetworkCompatibility(policyId, network)) {
+      const policyNetwork = savedPolicy.network === 0 ? "Preprod" : "Mainnet";
+      const currentNetwork = network === 0 ? "Preprod" : "Mainnet";
+      throw new Error(
+        `Policy script is not compatible with current network. Policy was created for ${policyNetwork}, but current network is ${currentNetwork}.`
+      );
+    }
+
+    // Initialize blockchain provider with appropriate API key
+    const blockfrostKey = getBlockfrostKey(network);
     const provider = new BlockfrostProvider(blockfrostKey);
 
     const address = await wallet.getChangeAddress();
     const utxos = await wallet.getUtxos();
-
-    // Try to find the saved policy script for this policy ID
-    const savedPolicies = getSavedPolicies();
-    const savedPolicy = savedPolicies.find((p: any) => p.policyId === policyId);
 
     let forgingScript;
     if (savedPolicy && savedPolicy.nativeScript) {
