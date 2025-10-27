@@ -1,0 +1,21 @@
+{
+  "policyId": "8bf7161744069181451d5e9f589d474ef8f4a18243d3dd66eaa4c978",
+  "collectionName": "Swaggo",
+  "nativeScript": {
+    "type": "all",
+    "scripts": [
+      {
+        "type": "before",
+        "slot": "300000000"
+      },
+      {
+        "type": "sig",
+        "keyHash": "822eafdf2a2632c73a7378bd37f9413455397fd02485e01f33d02e1f"
+      }
+    ]
+  },
+  "forgeScript": "82018282051a11e1a3008200581c822eafdf2a2632c73a7378bd37f9413455397fd02485e01f33d02e1f",
+  "network": 0,
+  "createdAt": "2025-10-25T01:06:59.867Z",
+  "txHash": "16401799da605fb9092ae785698d6b0e3f7aabbb374008d30f47612570051a14"
+}

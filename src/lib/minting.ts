@@ -155,19 +155,51 @@ export async function mintNFTs(
       // Add minting to transaction
       txBuilder.mint("1", policyId, tokenHex).mintingScript(forgeScript);
 
-      // Create proper metadata
-      const imageUrl =
-        assetData.image === "addimage"
-          ? "https://pbs.twimg.com/profile_images/1969705385977114625/Cnw3WAAr_400x400.jpg" // Default image
-          : assetData.image;
+      // Create proper metadata - use custom metadata if available, otherwise use default structure
+      let assetMetadata: AssetMetadata;
 
-      nftMetadata[policyId][assetName] = get721Metadata(
-        assetData.name,
-        imageUrl,
-        assetData.description,
-        assetData.artist,
-        collectionName || "Default Collection"
-      );
+      if (assetData && typeof assetData === "object") {
+        // Use the custom metadata directly, but ensure required fields exist
+        assetMetadata = {
+          name: assetData.name || assetName,
+          description: assetData.description || "",
+          image:
+            assetData.image === "addimage"
+              ? "https://pbs.twimg.com/profile_images/1969705385977114625/Cnw3WAAr_400x400.jpg"
+              : assetData.image || "",
+          mediaType: assetData.mediaType || "image/png",
+          files: assetData.files || [
+            {
+              mediaType: assetData.mediaType || "image/png",
+              name: assetData.name || assetName,
+              src:
+                assetData.image === "addimage"
+                  ? "https://pbs.twimg.com/profile_images/1969705385977114625/Cnw3WAAr_400x400.jpg"
+                  : assetData.image || "",
+            },
+          ],
+          // Include any additional custom fields
+          ...assetData,
+          // Ensure collection field is set
+          collection: collectionName || "Default Collection",
+        };
+      } else {
+        // Fallback to default metadata structure
+        const imageUrl =
+          assetData?.image === "addimage"
+            ? "https://pbs.twimg.com/profile_images/1969705385977114625/Cnw3WAAr_400x400.jpg"
+            : assetData?.image || "";
+
+        assetMetadata = get721Metadata(
+          assetData?.name || assetName,
+          imageUrl,
+          assetData?.description || "",
+          assetData?.artist || "",
+          collectionName || "Default Collection"
+        );
+      }
+
+      nftMetadata[policyId][assetName] = assetMetadata;
     }
 
     // Build and submit transaction
@@ -443,19 +475,51 @@ export async function mintToExistingCollection(
       // Add minting to transaction
       txBuilder.mint("1", policyId, tokenHex).mintingScript(forgeScript);
 
-      // Create proper metadata
-      const imageUrl =
-        assetData.image === "addimage"
-          ? "https://pbs.twimg.com/profile_images/1969705385977114625/Cnw3WAAr_400x400.jpg" // Default image
-          : assetData.image;
+      // Create proper metadata - use custom metadata if available, otherwise use default structure
+      let assetMetadata: AssetMetadata;
 
-      nftMetadata[policyId][assetName] = get721Metadata(
-        assetData.name,
-        imageUrl,
-        assetData.description,
-        assetData.artist,
-        collectionName
-      );
+      if (assetData && typeof assetData === "object") {
+        // Use the custom metadata directly, but ensure required fields exist
+        assetMetadata = {
+          name: assetData.name || assetName,
+          description: assetData.description || "",
+          image:
+            assetData.image === "addimage"
+              ? "https://pbs.twimg.com/profile_images/1969705385977114625/Cnw3WAAr_400x400.jpg"
+              : assetData.image || "",
+          mediaType: assetData.mediaType || "image/png",
+          files: assetData.files || [
+            {
+              mediaType: assetData.mediaType || "image/png",
+              name: assetData.name || assetName,
+              src:
+                assetData.image === "addimage"
+                  ? "https://pbs.twimg.com/profile_images/1969705385977114625/Cnw3WAAr_400x400.jpg"
+                  : assetData.image || "",
+            },
+          ],
+          // Include any additional custom fields
+          ...assetData,
+          // Ensure collection field is set
+          collection: collectionName || "Default Collection",
+        };
+      } else {
+        // Fallback to default metadata structure
+        const imageUrl =
+          assetData?.image === "addimage"
+            ? "https://pbs.twimg.com/profile_images/1969705385977114625/Cnw3WAAr_400x400.jpg"
+            : assetData?.image || "";
+
+        assetMetadata = get721Metadata(
+          assetData?.name || assetName,
+          imageUrl,
+          assetData?.description || "",
+          assetData?.artist || "",
+          collectionName || "Default Collection"
+        );
+      }
+
+      nftMetadata[policyId][assetName] = assetMetadata;
     }
 
     // Build and submit transaction
@@ -514,6 +578,26 @@ export async function burnNFT(
     const address = await wallet.getChangeAddress();
     const utxos = await wallet.getUtxos();
 
+    // Check if wallet has sufficient ADA for transaction fees
+    const lovelaceBalance = utxos.reduce((sum, utxo) => sum + parseInt(utxo.output.amount[0].quantity), 0);
+    const minRequiredLovelace = 2000000; // 2 ADA minimum for fees and buffer
+    
+    if (lovelaceBalance < minRequiredLovelace) {
+      throw new Error(`Insufficient ADA balance for burn transaction. Required: ${(minRequiredLovelace / 1000000).toFixed(2)} ADA, Available: ${(lovelaceBalance / 1000000).toFixed(2)} ADA`);
+    }
+
+    // Check if user actually owns the NFT they're trying to burn
+    const assetUnit = policyId + stringToHex(assetName);
+    const userOwnsAsset = utxos.some(utxo => 
+      utxo.output.amount.some((amount: any) => 
+        amount.unit === assetUnit && parseInt(amount.quantity) >= parseInt(quantity)
+      )
+    );
+    
+    if (!userOwnsAsset) {
+      throw new Error(`You don't own ${quantity} of ${assetName}. Please check your wallet balance.`);
+    }
+
     let forgingScript;
     if (savedPolicy && savedPolicy.nativeScript) {
       // Use the saved native script if available
@@ -549,10 +633,27 @@ export async function burnNFT(
     };
   } catch (error) {
     console.error("Burning failed:", error);
+    
+    let errorMessage = "Burning failed. Please try again.";
+    
+    if (error instanceof Error) {
+      if (error.message.includes("UTXO Balance Insufficient")) {
+        errorMessage = "Insufficient ADA balance for transaction fees. Please ensure you have at least 2 ADA in your wallet.";
+      } else if (error.message.includes("Insufficient ADA balance")) {
+        errorMessage = error.message;
+      } else if (error.message.includes("Policy script is not compatible")) {
+        errorMessage = error.message;
+      } else if (error.message.includes("Policy not found")) {
+        errorMessage = "Policy script not found. Please upload the policy script for this collection.";
+      } else {
+        errorMessage = `Burn transaction failed: ${error.message}`;
+      }
+    }
+    
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred",
-      message: "Burning failed. Please try again.",
+      message: errorMessage,
     };
   }
 }
