@@ -579,23 +579,56 @@ export async function burnNFT(
     const utxos = await wallet.getUtxos();
 
     // Check if wallet has sufficient ADA for transaction fees
-    const lovelaceBalance = utxos.reduce((sum, utxo) => sum + parseInt(utxo.output.amount[0].quantity), 0);
+    const lovelaceBalance = utxos.reduce(
+      (sum, utxo) => sum + parseInt(utxo.output.amount[0].quantity),
+      0
+    );
     const minRequiredLovelace = 2000000; // 2 ADA minimum for fees and buffer
-    
+
     if (lovelaceBalance < minRequiredLovelace) {
-      throw new Error(`Insufficient ADA balance for burn transaction. Required: ${(minRequiredLovelace / 1000000).toFixed(2)} ADA, Available: ${(lovelaceBalance / 1000000).toFixed(2)} ADA`);
+      throw new Error(
+        `Insufficient ADA balance for burn transaction. Required: ${(
+          minRequiredLovelace / 1000000
+        ).toFixed(2)} ADA, Available: ${(lovelaceBalance / 1000000).toFixed(
+          2
+        )} ADA`
+      );
     }
 
     // Check if user actually owns the NFT they're trying to burn
-    const assetUnit = policyId + stringToHex(assetName);
-    const userOwnsAsset = utxos.some(utxo => 
-      utxo.output.amount.some((amount: any) => 
-        amount.unit === assetUnit && parseInt(amount.quantity) >= parseInt(quantity)
+    // Check if assetName is already hex-encoded (starts with numbers/letters only)
+    const isHexEncoded = /^[0-9a-fA-F]+$/.test(assetName);
+    const assetUnit =
+      policyId + (isHexEncoded ? assetName : stringToHex(assetName));
+
+    // Debug logging
+    console.log("Burn Debug Info:");
+    console.log("- Policy ID:", policyId);
+    console.log("- Asset Name:", assetName);
+    console.log("- Is Hex Encoded:", isHexEncoded);
+    console.log("- Asset Unit:", assetUnit);
+    console.log("- Quantity to burn:", quantity);
+    console.log("- Available UTXOs:", utxos.length);
+
+    // Log all assets in wallet for debugging
+    const walletAssets = utxos.flatMap((utxo) => utxo.output.amount);
+    console.log(
+      "- All assets in wallet:",
+      walletAssets.map((a) => ({ unit: a.unit, quantity: a.quantity }))
+    );
+
+    const userOwnsAsset = utxos.some((utxo) =>
+      utxo.output.amount.some(
+        (amount: any) =>
+          amount.unit === assetUnit &&
+          parseInt(amount.quantity) >= parseInt(quantity)
       )
     );
-    
+
     if (!userOwnsAsset) {
-      throw new Error(`You don't own ${quantity} of ${assetName}. Please check your wallet balance.`);
+      throw new Error(
+        `You don't own ${quantity} of ${assetName}. Please check your wallet balance.`
+      );
     }
 
     let forgingScript;
@@ -609,8 +642,8 @@ export async function burnNFT(
       forgingScript = ForgeScript.withOneSignature(address);
     }
 
-    // Convert asset name to hex
-    const tokenNameHex = stringToHex(assetName);
+    // Convert asset name to hex (use same logic as above)
+    const tokenNameHex = isHexEncoded ? assetName : stringToHex(assetName);
 
     // Initialize transaction builder
     const txBuilder = new MeshTxBuilder({ fetcher: provider });
@@ -633,23 +666,25 @@ export async function burnNFT(
     };
   } catch (error) {
     console.error("Burning failed:", error);
-    
+
     let errorMessage = "Burning failed. Please try again.";
-    
+
     if (error instanceof Error) {
       if (error.message.includes("UTXO Balance Insufficient")) {
-        errorMessage = "Insufficient ADA balance for transaction fees. Please ensure you have at least 2 ADA in your wallet.";
+        errorMessage =
+          "Insufficient ADA balance for transaction fees. Please ensure you have at least 2 ADA in your wallet.";
       } else if (error.message.includes("Insufficient ADA balance")) {
         errorMessage = error.message;
       } else if (error.message.includes("Policy script is not compatible")) {
         errorMessage = error.message;
       } else if (error.message.includes("Policy not found")) {
-        errorMessage = "Policy script not found. Please upload the policy script for this collection.";
+        errorMessage =
+          "Policy script not found. Please upload the policy script for this collection.";
       } else {
         errorMessage = `Burn transaction failed: ${error.message}`;
       }
     }
-    
+
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred",
