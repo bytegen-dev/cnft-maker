@@ -39,15 +39,26 @@ import {
   RefreshCw,
   Download,
   X,
+  Grid3X3,
+  List,
+  Flame,
 } from "lucide-react";
 import {
   mintNFTs,
-  getWalletInfo,
   getSavedPolicies,
   mintToExistingCollection,
   burnNFT,
   hasPolicyScript,
 } from "@/lib/minting";
+import {
+  useWallet,
+  useWalletList,
+  useAddress,
+  useAssets,
+  useLovelace,
+  useNetwork,
+} from "@meshsdk/react";
+import { BlockfrostProvider } from "@meshsdk/core";
 import {
   getDefaultMetadata,
   getExistingCollectionMetadata,
@@ -57,23 +68,32 @@ import Editor from "@monaco-editor/react";
 import { NFTCard } from "./NFTCard";
 import { NFTDetailsDialog } from "./NFTDetailsDialog";
 import { CopyButton } from "@/components/ui/copy-button";
+import { BurnDialog } from "./BurnDialog";
 
 export default function MintingInterface() {
+  // Browser wallet hooks
+  const {
+    wallet,
+    state,
+    connected,
+    name,
+    connecting,
+    connect,
+    disconnect,
+    error,
+  } = useWallet();
+  const wallets = useWalletList();
+  const address = useAddress();
+  const assets = useAssets();
+  const lovelace = useLovelace();
+  const network = useNetwork();
+
   const [isMinting, setIsMinting] = useState(false);
   const [mintResult, setMintResult] = useState<{
     success: boolean;
     txHash?: string;
     message: string;
   } | null>(null);
-  const [walletInfo, setWalletInfo] = useState<{
-    address: string;
-    balance: any[];
-    networkId: number;
-    lovelace: string;
-    assets: any[];
-    networkName: string;
-  } | null>(null);
-  const [isLoadingWallet, setIsLoadingWallet] = useState(false);
   const [collectionName, setCollectionName] = useState("");
   const [nftMetadata, setNftMetadata] = useState(
     JSON.stringify(
@@ -86,16 +106,36 @@ export default function MintingInterface() {
   const [isUploading, setIsUploading] = useState(false);
   const [savedPolicies, setSavedPolicies] = useState<any[]>([]);
   const [selectedPolicy, setSelectedPolicy] = useState<string>("");
-  const [mintMode, setMintMode] = useState<"new" | "existing">("new");
+  const [mintMode, setMintMode] = useState<"new" | "existing">(() => {
+    try {
+      const saved = localStorage.getItem("mintMode");
+      return saved === "new" || saved === "existing" ? saved : "new";
+    } catch {
+      return "new";
+    }
+  });
   const [customRecipients, setCustomRecipients] = useState<string[]>([
     "",
     "",
     "",
   ]);
   const [useCustomRecipients, setUseCustomRecipients] = useState(false);
-  const [useTimeLock, setUseTimeLock] = useState(true);
-  const [timeLockEpochs, setTimeLockEpochs] = useState(10);
-  const [walletError, setWalletError] = useState<string | null>(null);
+  const [useTimeLock, setUseTimeLock] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("useTimeLock");
+      return saved ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
+  const [timeLockEpochs, setTimeLockEpochs] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("timeLockEpochs");
+      return saved ? parseInt(saved) : 10;
+    } catch {
+      return 10;
+    }
+  });
   const [burnDialogOpen, setBurnDialogOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<any>(null);
   const [isBurning, setIsBurning] = useState(false);
@@ -106,7 +146,7 @@ export default function MintingInterface() {
   } | null>(null);
   const [policyScript, setPolicyScript] = useState<any>(null);
   const [isGalleryMinimized, setIsGalleryMinimized] = useState(false);
-  const [isCollectionsMinimized, setIsCollectionsMinimized] = useState(false);
+  const [isCollectionsMinimized, setIsCollectionsMinimized] = useState(true);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [uploadResult, setUploadResult] = useState<{
     success: boolean;
@@ -114,10 +154,36 @@ export default function MintingInterface() {
   } | null>(null);
   const [nftDetailsDialogOpen, setNftDetailsDialogOpen] = useState(false);
   const [selectedNft, setSelectedNft] = useState<any>(null);
-  const [galleryFilter, setGalleryFilter] = useState<string>("all");
-  const [gallerySearch, setGallerySearch] = useState<string>("");
+  const [galleryFilter, setGalleryFilter] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem("galleryFilter");
+      return saved || "all";
+    } catch {
+      return "all";
+    }
+  });
+  const [gallerySearch, setGallerySearch] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem("gallerySearch");
+      return saved || "";
+    } catch {
+      return "";
+    }
+  });
   const [isMetadataMinimized, setIsMetadataMinimized] = useState(false);
   const [adaPrice, setAdaPrice] = useState<number>(0);
+  const [enhancedAssets, setEnhancedAssets] = useState<any[]>([]);
+  const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
+  const [isLoadingAssets, setIsLoadingAssets] = useState(false);
+  const [savedWalletId, setSavedWalletId] = useState<string | null>(null);
+  const [nftViewMode, setNftViewMode] = useState<"grid" | "list">(() => {
+    try {
+      const saved = localStorage.getItem("nftViewMode");
+      return saved === "grid" || saved === "list" ? saved : "grid";
+    } catch {
+      return "grid";
+    }
+  });
 
   // Fetch ADA price from CoinGecko
   const fetchAdaPrice = async () => {
@@ -133,32 +199,145 @@ export default function MintingInterface() {
     }
   };
 
-  // Load wallet info and saved policies on component mount
+  // Wallet persistence functions
+  const saveWalletId = (walletId: string) => {
+    try {
+      localStorage.setItem("cardano_wallet_id", walletId);
+      setSavedWalletId(walletId);
+    } catch (error) {
+      console.error("Failed to save wallet ID:", error);
+    }
+  };
+
+  const clearWalletId = () => {
+    try {
+      localStorage.removeItem("cardano_wallet_id");
+      setSavedWalletId(null);
+    } catch (error) {
+      console.error("Failed to clear wallet ID:", error);
+    }
+  };
+
+  const loadSavedWalletId = () => {
+    try {
+      const savedId = localStorage.getItem("cardano_wallet_id");
+      if (savedId) {
+        setSavedWalletId(savedId);
+        return savedId;
+      }
+    } catch (error) {
+      console.error("Failed to load saved wallet ID:", error);
+    }
+    return null;
+  };
+
+  // Fetch NFT metadata for all assets
+  const fetchNFTMetadata = async (assets: any[]) => {
+    if (!assets || assets.length === 0) return [];
+
+    setIsLoadingMetadata(true);
+    try {
+      const provider = new BlockfrostProvider(
+        process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY || ""
+      );
+
+      const enhancedAssets = await Promise.all(
+        assets.map(async (asset: any) => {
+          try {
+            const metadata = await provider.fetchAssetMetadata(asset.unit);
+
+            let imageUrl = null;
+            if (metadata?.image) {
+              if (metadata.image.startsWith("ipfs://")) {
+                // Handle ipfs://{hash} format
+                const ipfsHash = metadata.image.replace("ipfs://", "");
+                imageUrl = `https://ipfs.io/ipfs/${ipfsHash}`;
+              } else {
+                imageUrl = metadata.image;
+              }
+            } else if (
+              metadata?.files &&
+              metadata.files.length > 0 &&
+              metadata.files[0].src
+            ) {
+              const fileSrc = metadata.files[0].src;
+              if (fileSrc.startsWith("ipfs://")) {
+                // Handle ipfs://{hash} format
+                const ipfsHash = fileSrc.replace("ipfs://", "");
+                imageUrl = `https://ipfs.io/ipfs/${ipfsHash}`;
+              } else {
+                imageUrl = fileSrc;
+              }
+            }
+
+            return {
+              ...asset,
+              metadata: metadata,
+              imageUrl: imageUrl,
+            };
+          } catch (metadataError) {
+            console.error(
+              `Failed to fetch metadata for ${asset.unit}:`,
+              metadataError
+            );
+            return {
+              ...asset,
+              metadata: null,
+              imageUrl: null,
+            };
+          }
+        })
+      );
+
+      return enhancedAssets;
+    } catch (error) {
+      console.error("Failed to fetch NFT metadata:", error);
+      return assets.map((asset) => ({
+        ...asset,
+        metadata: null,
+        imageUrl: null,
+      }));
+    } finally {
+      setIsLoadingMetadata(false);
+    }
+  };
+
+  // Load saved policies and ADA price on component mount
   useEffect(() => {
-    const loadWalletInfo = async () => {
-      setIsLoadingWallet(true);
-      setWalletError(null);
-      try {
-        const info = await getWalletInfo();
-        setWalletInfo(info);
-      } catch (error) {
-        console.error("Failed to load wallet info:", error);
-        setWalletError(
-          "Failed to load wallet info. Please check your environment variables."
-        );
-      } finally {
-        setIsLoadingWallet(false);
+    const loadInitialData = async () => {
+      loadSavedPolicies();
+      await fetchAdaPrice();
+
+      // Try to auto-reconnect to saved wallet
+      const savedWalletId = loadSavedWalletId();
+      if (savedWalletId && wallets.length > 0) {
+        const walletExists = wallets.find((w) => w.id === savedWalletId);
+        if (walletExists) {
+          console.log("Auto-reconnecting to saved wallet:", savedWalletId);
+          connect(savedWalletId);
+        } else {
+          console.log("Saved wallet not found, clearing saved wallet ID");
+          clearWalletId();
+        }
       }
     };
 
-    const loadInitialData = async () => {
-      await loadWalletInfo();
-      loadSavedPolicies();
-      await fetchAdaPrice();
-    };
-
     loadInitialData();
-  }, []);
+  }, [wallets]); // Add wallets as dependency
+
+  // Fetch NFT metadata when assets change
+  useEffect(() => {
+    if (assets && assets.length > 0) {
+      setIsLoadingAssets(false);
+      fetchNFTMetadata(assets).then(setEnhancedAssets);
+    } else if (assets && assets.length === 0) {
+      setIsLoadingAssets(false);
+      setEnhancedAssets([]);
+    } else {
+      setIsLoadingAssets(true);
+      setEnhancedAssets([]);
+    }
+  }, [assets]);
 
   // Load minimized states from localStorage
   useEffect(() => {
@@ -209,6 +388,30 @@ export default function MintingInterface() {
     );
   }, [isMetadataMinimized]);
 
+  useEffect(() => {
+    localStorage.setItem("nftViewMode", nftViewMode);
+  }, [nftViewMode]);
+
+  useEffect(() => {
+    localStorage.setItem("galleryFilter", galleryFilter);
+  }, [galleryFilter]);
+
+  useEffect(() => {
+    localStorage.setItem("gallerySearch", gallerySearch);
+  }, [gallerySearch]);
+
+  useEffect(() => {
+    localStorage.setItem("useTimeLock", JSON.stringify(useTimeLock));
+  }, [useTimeLock]);
+
+  useEffect(() => {
+    localStorage.setItem("timeLockEpochs", timeLockEpochs.toString());
+  }, [timeLockEpochs]);
+
+  useEffect(() => {
+    localStorage.setItem("mintMode", mintMode);
+  }, [mintMode]);
+
   // Update metadata when selectedPolicy changes and we have saved policies
   useEffect(() => {
     if (selectedPolicy && savedPolicies.length > 0 && mintMode === "existing") {
@@ -238,6 +441,14 @@ export default function MintingInterface() {
   }, [nftMetadata, useCustomRecipients]);
 
   const handleMint = async () => {
+    if (!connected || !wallet) {
+      setMintResult({
+        success: false,
+        message: "Please connect your wallet first.",
+      });
+      return;
+    }
+
     setIsMinting(true);
     setMintResult(null);
 
@@ -262,6 +473,7 @@ export default function MintingInterface() {
 
       if (mintMode === "new") {
         result = await mintNFTs(
+          wallet,
           collectionName,
           parsedMetadata,
           recipientsToUse,
@@ -277,6 +489,7 @@ export default function MintingInterface() {
           return;
         }
         result = await mintToExistingCollection(
+          wallet,
           selectedPolicy,
           collectionName,
           parsedMetadata,
@@ -319,22 +532,6 @@ export default function MintingInterface() {
     }
   };
 
-  const handleGetWalletInfo = async () => {
-    setIsLoadingWallet(true);
-    setWalletError(null);
-    try {
-      const info = await getWalletInfo();
-      setWalletInfo(info);
-    } catch (error) {
-      console.error("Failed to get wallet info:", error);
-      setWalletError(
-        "Failed to load wallet info. Please check your environment variables."
-      );
-    } finally {
-      setIsLoadingWallet(false);
-    }
-  };
-
   const loadSavedPolicies = () => {
     const policies = getSavedPolicies();
     console.log("Loading saved policies:", policies);
@@ -350,9 +547,9 @@ export default function MintingInterface() {
 
   // Get unique collections from wallet assets
   const getUniqueCollections = () => {
-    if (!walletInfo?.assets) return [];
+    if (!enhancedAssets) return [];
     const collections = new Set<string>();
-    walletInfo.assets.forEach((asset: any) => {
+    enhancedAssets.forEach((asset: any) => {
       if (asset.metadata?.collection) {
         collections.add(asset.metadata.collection);
       }
@@ -360,11 +557,19 @@ export default function MintingInterface() {
     return Array.from(collections).sort();
   };
 
+  const refreshAssets = async () => {
+    const newAssets = await wallet?.getAssets();
+    if (!newAssets) return;
+    fetchNFTMetadata(newAssets as any[]).then((assets) =>
+      setEnhancedAssets(assets)
+    );
+  };
+
   // Filter NFTs based on selected collection and search term
   const getFilteredNFTs = () => {
-    if (!walletInfo?.assets) return [];
+    if (!enhancedAssets) return [];
 
-    let filtered = walletInfo.assets;
+    let filtered = enhancedAssets;
 
     // Filter by collection
     if (galleryFilter !== "all") {
@@ -411,20 +616,24 @@ export default function MintingInterface() {
   };
 
   const handleBurnNFT = async (asset: any) => {
+    if (!connected || !wallet) {
+      setBurnResult({
+        success: false,
+        message: "Please connect your wallet first.",
+      });
+      return;
+    }
+
     setIsBurning(true);
     setBurnResult(null);
     try {
       const result = await burnNFT(
+        wallet,
         asset.policyId,
         asset.assetName,
         asset.quantity
       );
       setBurnResult(result);
-
-      if (result.success) {
-        // Refresh wallet info after successful burn
-        handleGetWalletInfo();
-      }
     } catch (error) {
       setBurnResult({
         success: false,
@@ -617,46 +826,100 @@ export default function MintingInterface() {
         {/* Wallet Information Card */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Wallet className="h-5 w-5" />
-                Wallet
-              </div>
-              <Button
-                onClick={handleGetWalletInfo}
-                disabled={isLoadingWallet}
-                variant="outline"
-              >
-                {isLoadingWallet ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <>
-                    Refresh Wallet
-                    <RefreshCw className="h-4 w-4" />
-                  </>
-                )}
-              </Button>
+            <CardTitle className="flex items-center gap-2">
+              <Wallet className="h-5 w-5" />
+              Wallet Connection
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {isLoadingWallet && !walletInfo && (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin mr-2" />
-                <span className="text-muted-foreground">
-                  Loading wallet info...
-                </span>
-              </div>
-            )}
-
-            {walletError && (
-              <Alert className="border-red-500">
-                <XCircle className="h-4 w-4" />
-                <AlertDescription>{walletError}</AlertDescription>
-              </Alert>
-            )}
-
-            {walletInfo && (
+            {!connected ? (
               <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Connect your browser wallet to mint NFTs
+                </p>
+                <Separator className="my-4" />
+                {wallets.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-2">
+                    {wallets.map((wallet) => (
+                      <Button
+                        key={wallet.name}
+                        onClick={() => {
+                          connect(wallet.id);
+                          saveWalletId(wallet.id);
+                        }}
+                        disabled={connecting}
+                        variant="outline"
+                        className="justify-start h-auto p-4"
+                      >
+                        <img
+                          src={wallet.icon}
+                          alt={wallet.name}
+                          className="w-6 h-6 mr-3"
+                        />
+                        <div className="text-left">
+                          <div className="font-medium">{wallet.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {wallet.version}
+                          </div>
+                        </div>
+                      </Button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center">
+                    ...
+                  </p>
+                )}
+                {connecting && (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    <span className="text-sm text-muted-foreground">
+                      Connecting...
+                    </span>
+                  </div>
+                )}
+                {!!error && (
+                  <Alert className="border-red-500">
+                    <XCircle className="h-4 w-4" />
+                    <AlertDescription>
+                      {(error as any)?.message || "Connection failed"}
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <img
+                      src={
+                        wallets.find(
+                          (w) => w.id?.toLowerCase() === name?.toLowerCase()
+                        )?.icon
+                      }
+                      alt={name || "Wallet"}
+                      className="w-6 h-6 rounded-full border border-border "
+                    />
+                    <span className="font-medium">{name}</span>
+                    <Badge
+                      variant="outline"
+                      className="text-green-600 border-green-600"
+                    >
+                      Connected
+                    </Badge>
+                  </div>
+                  <Button
+                    onClick={() => {
+                      disconnect();
+                      clearWalletId();
+                    }}
+                    variant="outline"
+                    size="sm"
+                  >
+                    Disconnect
+                  </Button>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <Card>
                     <CardContent className="p-4">
@@ -664,7 +927,7 @@ export default function MintingInterface() {
                         Network
                       </p>
                       <Badge variant="outline" className="mt-1">
-                        {walletInfo.networkName}
+                        {network === 0 ? "Preprod" : "Mainnet"}
                       </Badge>
                     </CardContent>
                   </Card>
@@ -673,170 +936,318 @@ export default function MintingInterface() {
                       <p className="text-sm font-medium text-muted-foreground">
                         ADA Balance
                       </p>
-                      <p className="font-mono text-sm font-bold">
-                        {(parseInt(walletInfo.lovelace) / 1000000).toFixed(6)}{" "}
-                        ADA{" "}
+                      <div className="flex items-center gap-2 mt-1">
+                        <Coins className="h-4 w-4" />
+                        <span className="font-mono text-sm">
+                          {lovelace
+                            ? (parseInt(lovelace) / 1000000).toFixed(2)
+                            : "0.00"}
+                        </span>
                         {adaPrice > 0 && (
-                          <span className="text-muted-foreground">
+                          <span className="text-xs text-muted-foreground">
                             ($
                             {(
-                              adaPrice *
-                              (parseInt(walletInfo.lovelace) / 1000000)
+                              (parseInt(lovelace || "0") / 1000000) *
+                              adaPrice
                             ).toFixed(2)}
                             )
                           </span>
                         )}
-                      </p>
+                      </div>
                     </CardContent>
                   </Card>
                 </div>
 
-                <Card className="gap-1">
-                  <CardHeader>
-                    <CardTitle className="text-sm">Wallet Address</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center gap-2">
-                      <p className="font-mono text-xs bg-muted p-2 rounded-lg border flex-1 truncate">
-                        {walletInfo.address}
-                      </p>
-                      <CopyButton text={walletInfo.address} />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="gap-1">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm">
-                        NFT Gallery{" "}
-                        {walletInfo.assets &&
-                          walletInfo.assets.length > 0 &&
-                          `(${getFilteredNFTs().length}${
-                            galleryFilter !== "all"
-                              ? ` of ${walletInfo.assets.length}`
-                              : ""
-                          })`}
-                      </CardTitle>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          setIsGalleryMinimized(!isGalleryMinimized)
-                        }
-                        className="h-8 w-8 p-0 rounded-full"
-                      >
-                        {isGalleryMinimized ? (
-                          <Plus className="h-4 w-4" />
-                        ) : (
-                          <Minus className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
-                  </CardHeader>
-                  {!isGalleryMinimized && (
-                    <>
-                      <CardContent>
-                        <Separator className="mb-6" />
-                        {walletInfo.assets && walletInfo.assets.length > 0 ? (
-                          <div className="space-y-4">
-                            {/* Search and Filter Controls */}
-                            <div className="flex items-center gap-4 flex-col md:flex-row md:justify-between">
-                              {/* Search Bar */}
-                              <div className="flex-1 relative w-full md:max-w-[250px]">
-                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                                <Input
-                                  placeholder="Search by policyId, assetName, metadata..."
-                                  value={gallerySearch}
-                                  onChange={(e) =>
-                                    setGallerySearch(e.target.value)
-                                  }
-                                  className="pl-10"
-                                />
-                              </div>
-
-                              {/* Collection Filter */}
-                              <div className="flex items-center gap-2">
-                                <div className="flex items-center gap-1">
-                                  <Label
-                                    htmlFor="collection-filter"
-                                    className="text-sm font-medium whitespace-nowrap"
-                                  >
-                                    Collection:
-                                  </Label>
-                                </div>
-                                <Select
-                                  value={galleryFilter}
-                                  onValueChange={setGalleryFilter}
-                                >
-                                  <SelectTrigger className="w-48">
-                                    <SelectValue placeholder="Select collection..." />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="all">
-                                      All Collections
-                                    </SelectItem>
-                                    {getUniqueCollections().map(
-                                      (collection: string, index: number) => (
-                                        <SelectItem
-                                          key={index}
-                                          value={collection}
-                                        >
-                                          {collection}
-                                        </SelectItem>
-                                      )
-                                    )}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-
-                            {/* NFT Grid */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 [@media(min-width:1540px)]:grid-cols-3 gap-4">
-                              {getFilteredNFTs().map(
-                                (asset: any, index: number) => (
-                                  <NFTCard
-                                    key={index}
-                                    nft={asset}
-                                    onCardClick={(nft) => {
-                                      setSelectedNft(nft);
-                                      setNftDetailsDialogOpen(true);
-                                    }}
-                                    hasPolicyScript={hasPolicyScript}
-                                    burnDialogOpen={burnDialogOpen}
-                                    setBurnDialogOpen={setBurnDialogOpen}
-                                    selectedAsset={selectedAsset}
-                                    setSelectedAsset={setSelectedAsset}
-                                    burnResult={burnResult}
-                                    isBurning={isBurning}
-                                    handleBurnNFT={handleBurnNFT}
-                                    setBurnResult={setBurnResult}
-                                    setIsBurning={setIsBurning}
-                                    walletInfo={walletInfo}
-                                  />
-                                )
-                              )}
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="text-center py-8">
-                            <Coins className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                            <p className="text-muted-foreground">
-                              No NFTs found in your wallet
-                            </p>
-                            <p className="text-sm text-muted-foreground mt-2">
-                              Mint some NFTs to see them here!
-                            </p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </>
-                  )}
-                </Card>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground mb-2">
+                    Address
+                  </p>
+                  <div className="flex items-center gap-2 p-2 bg-muted rounded-md">
+                    <code className="text-xs flex-1 truncate">
+                      {address
+                        ? `${address.slice(0, 20)}...${address.slice(-20)}`
+                        : "Not available"}
+                    </code>
+                    {address && <CopyButton text={address} />}
+                  </div>
+                </div>
               </div>
             )}
           </CardContent>
         </Card>
+
+        {connected && (
+          <Card>
+            <CardHeader className="gap-1">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm">
+                  NFT Gallery{" "}
+                  {enhancedAssets &&
+                    enhancedAssets.length > 0 &&
+                    `(${getFilteredNFTs().length}${
+                      galleryFilter !== "all"
+                        ? ` of ${enhancedAssets.length}`
+                        : ""
+                    })`}
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 border rounded-md">
+                    <Button
+                      variant={nftViewMode === "grid" ? "default" : "ghost"}
+                      size="sm"
+                      onClick={() => setNftViewMode("grid")}
+                      className="h-8 w-8 p-0 rounded-none rounded-l-md"
+                    >
+                      <Grid3X3 className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant={nftViewMode === "list" ? "default" : "ghost"}
+                      size="sm"
+                      onClick={() => setNftViewMode("list")}
+                      className="h-8 w-8 p-0 rounded-none rounded-r-md"
+                    >
+                      <List className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => {
+                      refreshAssets();
+                    }}
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsGalleryMinimized(!isGalleryMinimized)}
+                    className="h-8 w-8 p-0 rounded-full"
+                  >
+                    {isGalleryMinimized ? (
+                      <Plus className="h-4 w-4" />
+                    ) : (
+                      <Minus className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            {!isGalleryMinimized && (
+              <>
+                <CardContent>
+                  <Separator className="mb-6" />
+                  {isLoadingAssets || isLoadingMetadata ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                      <span className="text-sm text-muted-foreground">
+                        {isLoadingAssets
+                          ? "Loading assets..."
+                          : "Loading NFT metadata..."}
+                      </span>
+                    </div>
+                  ) : enhancedAssets && enhancedAssets.length > 0 ? (
+                    <div className="space-y-4">
+                      {/* Search and Filter Controls */}
+                      <div className="flex items-center gap-4 flex-col md:flex-row md:justify-between">
+                        {/* Search Bar */}
+                        <div className="flex-1 relative w-full md:max-w-[250px]">
+                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                          <Input
+                            placeholder="Search by policyId, assetName, metadata..."
+                            value={gallerySearch}
+                            onChange={(e) => setGallerySearch(e.target.value)}
+                            className="pl-10"
+                          />
+                        </div>
+
+                        {/* Collection Filter */}
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1">
+                            <Label
+                              htmlFor="collection-filter"
+                              className="text-sm font-medium whitespace-nowrap"
+                            >
+                              Collection:
+                            </Label>
+                          </div>
+                          <Select
+                            value={galleryFilter}
+                            onValueChange={setGalleryFilter}
+                          >
+                            <SelectTrigger className="w-48">
+                              <SelectValue placeholder="Select collection..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">
+                                All Collections
+                              </SelectItem>
+                              {getUniqueCollections().map(
+                                (collection: string, index: number) => (
+                                  <SelectItem key={index} value={collection}>
+                                    {collection}
+                                  </SelectItem>
+                                )
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <Separator className="mt-6" />
+
+                      {/* NFT Grid/List */}
+                      {nftViewMode === "grid" ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 [@media(min-width:1540px)]:grid-cols-3 gap-4 items-stretch overflow-y-auto pt-6 -mt-4 max-h-[700px]">
+                          {getFilteredNFTs().map(
+                            (asset: any, index: number) => (
+                              <NFTCard
+                                key={index}
+                                nft={asset}
+                                onCardClick={(nft) => {
+                                  setSelectedNft(nft);
+                                  setNftDetailsDialogOpen(true);
+                                  console.log(nft);
+                                }}
+                                hasPolicyScript={hasPolicyScript}
+                                burnDialogOpen={burnDialogOpen}
+                                setBurnDialogOpen={setBurnDialogOpen}
+                                selectedAsset={selectedAsset}
+                                setSelectedAsset={setSelectedAsset}
+                                burnResult={burnResult}
+                                isBurning={isBurning}
+                                handleBurnNFT={handleBurnNFT}
+                                setBurnResult={setBurnResult}
+                                setIsBurning={setIsBurning}
+                                walletInfo={{
+                                  assets: enhancedAssets,
+                                  networkId: network,
+                                }}
+                              />
+                            )
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-2 overflow-y-auto pt-6 -mt-4 max-h-[700px]">
+                          {getFilteredNFTs().map(
+                            (asset: any, index: number) => (
+                              <div
+                                key={index}
+                                className="flex items-center gap-4 p-4 border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
+                                onClick={() => {
+                                  setSelectedNft(asset);
+                                  setNftDetailsDialogOpen(true);
+                                }}
+                              >
+                                <div className="w-16 h-16 rounded-lg overflow-hidden bg-muted flex-shrink-0">
+                                  {asset.imageUrl ? (
+                                    <img
+                                      src={asset.imageUrl}
+                                      alt={
+                                        asset.metadata?.name || asset.assetName
+                                      }
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center">
+                                      <Image className="h-6 w-6 text-muted-foreground" />
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <h3 className="font-medium truncate">
+                                    {asset.metadata?.name || asset.assetName}
+                                  </h3>
+                                  <p className="text-sm text-muted-foreground truncate">
+                                    {asset.metadata?.description ||
+                                      "No description"}
+                                  </p>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <Badge
+                                      variant="outline"
+                                      className="text-xs"
+                                    >
+                                      {asset.metadata?.collection ||
+                                        "Unknown Collection"}
+                                    </Badge>
+                                    <span className="text-xs text-muted-foreground">
+                                      {asset.policyId.slice(0, 8)}...
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {hasPolicyScript(asset.policyId) ? (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        setSelectedAsset(asset);
+                                        setBurnDialogOpen(true);
+                                      }}
+                                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    >
+                                      <Flame className="h-4 w-4" />
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      disabled
+                                      className="text-muted-foreground"
+                                    >
+                                      Cannot Burn
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          )}
+                          <BurnDialog
+                            isOpen={burnDialogOpen && selectedAsset?.assetName}
+                            onOpenChange={(open) => {
+                              setBurnDialogOpen(open);
+                              if (!open) {
+                                setSelectedAsset(null);
+                                setBurnResult(null);
+                                setIsBurning(false);
+                              }
+                            }}
+                            selectedAsset={selectedAsset}
+                            burnResult={burnResult}
+                            isBurning={isBurning}
+                            onBurn={handleBurnNFT}
+                            onClose={() => {
+                              setBurnDialogOpen(false);
+                              setSelectedAsset(null);
+                              setBurnResult(null);
+                              setIsBurning(false);
+                            }}
+                            walletInfo={{
+                              assets: enhancedAssets,
+                              networkId: network,
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <Coins className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                      <p className="text-muted-foreground">
+                        No NFTs found in your wallet
+                      </p>
+                      <p className="text-sm text-muted-foreground mt-2">
+                        Mint some NFTs to see them here!
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </>
+            )}
+          </Card>
+        )}
       </div>
 
       {/* Right Column - Minting */}
@@ -883,343 +1294,364 @@ export default function MintingInterface() {
           <CardContent className="space-y-4">
             {/* <Separator className="mb-6" /> */}
 
-            {/* Existing Collection Selection */}
-            {mintMode === "existing" && (
-              <div className="space-y-2">
-                <Label htmlFor="existing-collection">Select Collection</Label>
-                <div className="flex gap-2">
-                  <Select
-                    value={selectedPolicy}
-                    onValueChange={(value) => {
-                      setSelectedPolicy(value);
-                      // Update collection name when policy changes
-                      if (value) {
-                        const policy = savedPolicies.find(
-                          (p) => p.policyId === value
-                        );
-                        if (policy) {
-                          setCollectionName(policy.collectionName);
-                          // Update metadata with the selected collection name
-                          updateMetadataWithCollectionName(
-                            policy.collectionName
-                          );
-                        }
+            {connected ? (
+              <>
+                {/* Existing Collection Selection */}
+                {mintMode === "existing" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="existing-collection">
+                      Select Collection
+                    </Label>
+                    <div className="flex gap-2">
+                      <Select
+                        value={selectedPolicy}
+                        onValueChange={(value) => {
+                          setSelectedPolicy(value);
+                          // Update collection name when policy changes
+                          if (value) {
+                            const policy = savedPolicies.find(
+                              (p) => p.policyId === value
+                            );
+                            if (policy) {
+                              setCollectionName(policy.collectionName);
+                              // Update metadata with the selected collection name
+                              updateMetadataWithCollectionName(
+                                policy.collectionName
+                              );
+                            }
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="flex-1">
+                          <SelectValue placeholder="Choose a policy script..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {savedPolicies.map((policy: any, index: number) => (
+                            <SelectItem key={index} value={policy.policyId}>
+                              {policy.collectionName} (
+                              {policy.policyId.slice(0, 8)}
+                              ...)
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        onClick={loadSavedPolicies}
+                        variant="outline"
+                        size="sm"
+                      >
+                        Refresh
+                      </Button>
+                    </div>
+                    {savedPolicies.length === 0 && (
+                      <p className="text-sm text-muted-foreground">
+                        No saved policy scripts found.{" "}
+                        <span
+                          className="text-primary cursor-pointer underline"
+                          onClick={() => setUploadDialogOpen(true)}
+                        >
+                          Upload
+                        </span>{" "}
+                        a policy script first.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label htmlFor="collection-name">
+                    Collection Name{" "}
+                    {mintMode === "new" ? (
+                      <span className="text-red-500">*</span>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        not required
+                      </span>
+                    )}
+                  </Label>
+                  <Input
+                    id="collection-name"
+                    value={collectionName}
+                    onChange={(e) => {
+                      setCollectionName(e.target.value);
+                      // Update metadata with new collection name
+                      if (mintMode === "new") {
+                        updateMetadataWithCollectionName(e.target.value);
                       }
                     }}
-                  >
-                    <SelectTrigger className="flex-1">
-                      <SelectValue placeholder="Choose a collection..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {savedPolicies.map((policy: any, index: number) => (
-                        <SelectItem key={index} value={policy.policyId}>
-                          {policy.collectionName} ({policy.policyId.slice(0, 8)}
-                          ...)
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    onClick={loadSavedPolicies}
-                    variant="outline"
-                    size="sm"
-                  >
-                    Refresh
-                  </Button>
-                </div>
-                {savedPolicies.length === 0 && (
-                  <p className="text-sm text-muted-foreground">
-                    No saved collections found. Create a new collection first.
-                  </p>
-                )}
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label htmlFor="collection-name">
-                Collection Name{" "}
-                {mintMode === "new" ? (
-                  <span className="text-red-500">*</span>
-                ) : (
-                  <span className="text-muted-foreground">not required</span>
-                )}
-              </Label>
-              <Input
-                id="collection-name"
-                value={collectionName}
-                onChange={(e) => {
-                  setCollectionName(e.target.value);
-                  // Update metadata with new collection name
-                  if (mintMode === "new") {
-                    updateMetadataWithCollectionName(e.target.value);
-                  }
-                }}
-                placeholder="Enter collection name..."
-                className="w-full"
-                disabled={mintMode === "existing"}
-              />
-              {mintMode === "existing" ? (
-                <p className="text-xs text-muted-foreground">
-                  Collection name is determined by the selected existing
-                  collection
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Collection name is required to create a new collection
-                </p>
-              )}
-            </div>
-
-            {/* Time Lock Option - only for new collections */}
-            {mintMode === "new" && (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="use-time-lock"
-                    checked={useTimeLock}
-                    onChange={(e) => setUseTimeLock(e.target.checked)}
-                    className="rounded"
+                    placeholder="Enter collection name..."
+                    className="w-full"
+                    disabled={mintMode === "existing"}
                   />
-                  <Label htmlFor="use-time-lock">Use Time Lock</Label>
+                  {mintMode === "existing" ? (
+                    <p className="text-xs text-muted-foreground">
+                      Collection name is determined by the selected existing
+                      collection
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Collection name is required to create a new collection
+                    </p>
+                  )}
                 </div>
-                {!useTimeLock && (
-                  <div className="p-2 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded text-xs">
-                    <p className="text-yellow-800 dark:text-yellow-200 font-medium">
-                      ⚠️ Policy ID Warning
-                    </p>
-                    <p className="text-yellow-700 dark:text-yellow-300 mt-1">
-                      Without time lock, this collection will share the same
-                      policy ID as other non-time-locked collections from your
-                      wallet.
-                    </p>
+
+                {/* Time Lock Option - only for new collections */}
+                {mintMode === "new" && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="use-time-lock"
+                        checked={useTimeLock}
+                        onChange={(e) => setUseTimeLock(e.target.checked)}
+                        className="rounded"
+                      />
+                      <Label htmlFor="use-time-lock">Use Time Lock</Label>
+                    </div>
+                    {!useTimeLock && (
+                      <div className="p-2 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded text-xs">
+                        <p className="text-yellow-800 dark:text-yellow-200 font-medium">
+                          ⚠️ Policy ID Warning
+                        </p>
+                        <p className="text-yellow-700 dark:text-yellow-300 mt-1">
+                          Without time lock, this collection will share the same
+                          policy ID as other non-time-locked collections from
+                          your wallet.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-            )}
 
-            {/* Time Lock Settings - only for new collections */}
-            {mintMode === "new" && useTimeLock && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Time Lock Settings</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="time-lock-epochs">Duration (Epochs)</Label>
-                    <div className="flex items-center gap-2">
-                      <Slider
-                        id="time-lock-epochs"
-                        min={1}
-                        max={1000}
-                        value={[timeLockEpochs]}
-                        onValueChange={(value) => setTimeLockEpochs(value[0])}
-                        className="flex-1"
-                      />
-                      <span className="text-sm font-mono w-12 text-right">
-                        {timeLockEpochs}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>1 epoch (~5 days)</span>
-                      <span>1000 epochs (~13.7 years)</span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Time-locked collections expire after {timeLockEpochs} epochs
-                    (~{Math.round(timeLockEpochs * 5)} days). You won't be able
-                    to add more NFTs after expiration.
-                  </p>
-                </CardContent>
-              </Card>
-            )}
+                {/* Time Lock Settings - only for new collections */}
+                {mintMode === "new" && useTimeLock && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Time Lock Settings</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="time-lock-epochs">
+                          Duration (Epochs)
+                        </Label>
+                        <div className="flex items-center gap-2">
+                          <Slider
+                            id="time-lock-epochs"
+                            min={1}
+                            max={1000}
+                            value={[timeLockEpochs]}
+                            onValueChange={(value) =>
+                              setTimeLockEpochs(value[0])
+                            }
+                            className="flex-1"
+                          />
+                          <span className="text-sm font-mono w-12 text-right">
+                            {timeLockEpochs}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span>1 epoch (~5 days)</span>
+                          <span>1000 epochs (~13.7 years)</span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Time-locked collections expire after {timeLockEpochs}{" "}
+                        epochs (~{Math.round(timeLockEpochs * 5)} days). You
+                        won't be able to add more NFTs after expiration.
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
 
-            {/* Recipients Section */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="use-custom-recipients"
-                  checked={useCustomRecipients}
-                  onChange={(e) => {
-                    setUseCustomRecipients(e.target.checked);
-                    // Initialize recipients array when enabling custom recipients
-                    if (e.target.checked && customRecipients.length === 0) {
-                      setCustomRecipients(["", "", ""]);
-                    }
-                  }}
-                  className="rounded"
-                />
-                <Label htmlFor="use-custom-recipients">
-                  Use custom recipient addresses
-                </Label>
-              </div>
-
-              {useCustomRecipients && (
+                {/* Recipients Section */}
                 <div className="space-y-2">
-                  <Label>Recipient Addresses</Label>
-                  <div className="space-y-2">
-                    {customRecipients.map((address, index) => (
-                      <Input
-                        key={index}
-                        value={address}
-                        onChange={(e) => {
-                          const newRecipients = [...customRecipients];
-                          newRecipients[index] = e.target.value;
-                          setCustomRecipients(newRecipients);
-                        }}
-                        placeholder={`Recipient ${
-                          index + 1
-                        } address (optional)`}
-                        className="w-full font-mono text-sm"
-                      />
-                    ))}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Enter recipient addresses for your NFTs. Leave empty to use
-                    your wallet address for that NFT.
-                  </p>
-                </div>
-              )}
-
-              {!useCustomRecipients && (
-                <p className="text-sm text-muted-foreground">
-                  All NFTs will be sent to your wallet address.
-                </p>
-              )}
-            </div>
-
-            <Separator />
-
-            {/* NFT Metadata Editor */}
-
-            <p className="text-muted-foreground">
-              {mintMode === "new"
-                ? "Create a new collection with NFTs based on your metadata JSON."
-                : "Add NFTs to the selected existing collection based on your metadata JSON."}
-            </p>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center">
-                  <Label htmlFor="metadata-editor">
-                    Edit NFT Metadata (JSON)
-                  </Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    onClick={() =>
-                      updateMetadataWithCollectionName(collectionName)
-                    }
-                    variant="outline"
-                    size="sm"
-                  >
-                    Reset to Default
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setIsMetadataMinimized(!isMetadataMinimized)}
-                    className="h-8 w-8 p-0 rounded-full"
-                  >
-                    {isMetadataMinimized ? (
-                      <Plus className="h-4 w-4" />
-                    ) : (
-                      <Minus className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-              {!isMetadataMinimized && (
-                <>
-                  <div className="border rounded-md overflow-hidden">
-                    <Editor
-                      height="300px"
-                      defaultLanguage="json"
-                      value={nftMetadata}
-                      onChange={(value) => {
-                        setNftMetadata(value || "");
-                        // Update custom recipients array size based on metadata
-                        try {
-                          const parsedMetadata = JSON.parse(value || "{}");
-                          const assetCount = Object.keys(parsedMetadata).length;
-                          if (assetCount > 0) {
-                            setCustomRecipients((prev) => {
-                              const newArray = new Array(assetCount).fill("");
-                              // Preserve existing values
-                              return newArray.map(
-                                (_, index) => prev[index] || ""
-                              );
-                            });
-                          }
-                        } catch (error) {
-                          // If metadata is invalid, keep current recipients
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="use-custom-recipients"
+                      checked={useCustomRecipients}
+                      onChange={(e) => {
+                        setUseCustomRecipients(e.target.checked);
+                        // Initialize recipients array when enabling custom recipients
+                        if (e.target.checked && customRecipients.length === 0) {
+                          setCustomRecipients(["", "", ""]);
                         }
                       }}
-                      options={{
-                        minimap: { enabled: false },
-                        scrollBeyondLastLine: false,
-                        fontSize: 14,
-                        lineNumbers: "on",
-                        wordWrap: "on",
-                        automaticLayout: true,
-                      }}
-                      theme="vs-dark"
+                      className="rounded"
                     />
+                    <Label htmlFor="use-custom-recipients">
+                      Use custom recipient addresses
+                    </Label>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Edit the JSON metadata for your NFTs. Make sure the JSON is
-                    valid before minting. Click "Reset to Default" to update
-                    with current collection name.
-                  </p>
-                </>
-              )}
-            </div>
 
-            <Button
-              onClick={handleMint}
-              disabled={isMinting || !collectionName.trim()}
-              className="w-full"
-              size="lg"
-            >
-              {isMinting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  {useCustomRecipients && (
+                    <div className="space-y-2">
+                      <Label>Recipient Addresses</Label>
+                      <div className="space-y-2">
+                        {customRecipients.map((address, index) => (
+                          <Input
+                            key={index}
+                            value={address}
+                            onChange={(e) => {
+                              const newRecipients = [...customRecipients];
+                              newRecipients[index] = e.target.value;
+                              setCustomRecipients(newRecipients);
+                            }}
+                            placeholder={`Recipient ${
+                              index + 1
+                            } address (optional)`}
+                            className="w-full font-mono text-sm"
+                          />
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Enter recipient addresses for your NFTs. Leave empty to
+                        use your wallet address for that NFT.
+                      </p>
+                    </div>
+                  )}
+
+                  {!useCustomRecipients && (
+                    <p className="text-sm text-muted-foreground">
+                      All NFTs will be sent to your wallet address.
+                    </p>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* NFT Metadata Editor */}
+
+                <p className="text-muted-foreground">
                   {mintMode === "new"
-                    ? "Creating Collection..."
-                    : "Adding to Collection..."}
-                </>
-              ) : mintMode === "new" ? (
-                "Create Collection"
-              ) : (
-                "Add to Collection"
-              )}
-            </Button>
+                    ? "Create a new collection with NFTs based on your metadata JSON."
+                    : "Add NFTs to the selected existing collection based on your metadata JSON."}
+                </p>
 
-            {/* Result Alert */}
-            {mintResult && (
-              <Alert
-                className={
-                  mintResult.success ? "border-green-500" : "border-red-500"
-                }
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-2">
-                    {mintResult.success ? (
-                      <CheckCircle className="h-4 w-4" />
-                    ) : (
-                      <XCircle className="h-4 w-4" />
-                    )}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center">
+                      <Label htmlFor="metadata-editor">
+                        Edit NFT Metadata (JSON)
+                      </Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={() =>
+                          updateMetadataWithCollectionName(collectionName)
+                        }
+                        variant="outline"
+                        size="sm"
+                      >
+                        Reset to Default
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          setIsMetadataMinimized(!isMetadataMinimized)
+                        }
+                        className="h-8 w-8 p-0 rounded-full"
+                      >
+                        {isMetadataMinimized ? (
+                          <Plus className="h-4 w-4" />
+                        ) : (
+                          <Minus className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                  {!isMetadataMinimized && (
+                    <>
+                      <div className="border rounded-md overflow-hidden">
+                        <Editor
+                          height="300px"
+                          defaultLanguage="json"
+                          value={nftMetadata}
+                          onChange={(value) => {
+                            setNftMetadata(value || "");
+                            // Update custom recipients array size based on metadata
+                            try {
+                              const parsedMetadata = JSON.parse(value || "{}");
+                              const assetCount =
+                                Object.keys(parsedMetadata).length;
+                              if (assetCount > 0) {
+                                setCustomRecipients((prev) => {
+                                  const newArray = new Array(assetCount).fill(
+                                    ""
+                                  );
+                                  // Preserve existing values
+                                  return newArray.map(
+                                    (_, index) => prev[index] || ""
+                                  );
+                                });
+                              }
+                            } catch (error) {
+                              // If metadata is invalid, keep current recipients
+                            }
+                          }}
+                          options={{
+                            minimap: { enabled: false },
+                            scrollBeyondLastLine: false,
+                            fontSize: 14,
+                            lineNumbers: "on",
+                            wordWrap: "on",
+                            automaticLayout: true,
+                          }}
+                          theme="vs-dark"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Edit the JSON metadata for your NFTs. Make sure the JSON
+                        is valid before minting. Click "Reset to Default" to
+                        update with current collection name.
+                      </p>
+                    </>
+                  )}
+                </div>
+
+                <Button
+                  onClick={handleMint}
+                  disabled={
+                    isMinting ||
+                    !connected ||
+                    (mintMode === "new" && !collectionName.trim()) ||
+                    (mintMode === "existing" && !selectedPolicy)
+                  }
+                  className="w-full"
+                  size="lg"
+                >
+                  {isMinting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      {mintMode === "new"
+                        ? "Creating Collection..."
+                        : "Adding to Collection..."}
+                    </>
+                  ) : mintMode === "new" ? (
+                    "Create Collection"
+                  ) : (
+                    "Add to Collection"
+                  )}
+                </Button>
+
+                {/* Result Alert */}
+                {mintResult && (
+                  <Alert
+                    className={
+                      mintResult.success ? "border-green-500" : "border-red-500"
+                    }
+                  >
                     <AlertDescription>
                       <div className="space-y-2">
                         <p>{mintResult.message}</p>
                         {mintResult.txHash && (
-                          <div className="text-sm w-full flex items-center gap-2">
+                          <div className="text-sm flex items-center gap-2">
                             <strong className="w-fit">TxHash:</strong>
                             <div className="flex items-center gap-2 flex-1">
                               <a
                                 href={`https://${
-                                  walletInfo?.networkId === 0 ? "testnet." : ""
+                                  network === 0 ? "preprod." : ""
                                 }cardanoscan.io/transaction/${
                                   mintResult.txHash
                                 }`}
@@ -1261,17 +1693,20 @@ export default function MintingInterface() {
                         )}
                       </div>
                     </AlertDescription>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setMintResult(null)}
-                    className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
+                  </Alert>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground">
+                    Connect your wallet to proceed
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Please connect a browser wallet to mint NFTs
+                  </p>
                 </div>
-              </Alert>
+              </>
             )}
           </CardContent>
         </Card>
@@ -1295,6 +1730,9 @@ export default function MintingInterface() {
                 disabled={isUploading}
                 className="w-full"
               />
+              <p className="text-xs text-muted-foreground">
+                Upload an image to IPFS to get the IPFS hash.
+              </p>
             </div>
 
             {isUploading && (
@@ -1327,106 +1765,111 @@ export default function MintingInterface() {
         </Card>
 
         {/* Saved Collections Card */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2">
-                <Folder className="h-5 w-5" />
-                Saved Collections
-              </CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  setIsCollectionsMinimized(!isCollectionsMinimized)
-                }
-                className="h-8 w-8 p-0 rounded-full"
-              >
-                {isCollectionsMinimized ? (
-                  <Plus className="h-4 w-4" />
-                ) : (
-                  <Minus className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-          </CardHeader>
-          {!isCollectionsMinimized && (
-            <CardContent className="space-y-4">
-              <div className="flex items-center gap-2 flex-wrap items-center justify-center md:justify-start">
-                <Button onClick={loadSavedPolicies} variant="outline" size="sm">
-                  Load Collections
-                </Button>
+        {connected && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <Folder className="h-5 w-5" />
+                  Policy Scripts
+                </CardTitle>
                 <Button
-                  onClick={() => setUploadDialogOpen(true)}
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
+                  onClick={() =>
+                    setIsCollectionsMinimized(!isCollectionsMinimized)
+                  }
+                  className="h-8 w-8 p-0 rounded-full"
                 >
-                  Upload Policy Script
+                  {isCollectionsMinimized ? (
+                    <Plus className="h-4 w-4" />
+                  ) : (
+                    <Minus className="h-4 w-4" />
+                  )}
                 </Button>
-                <span className="text-sm text-muted-foreground text-center">
-                  {savedPolicies.length} collection(s) saved
-                </span>
               </div>
+            </CardHeader>
+            {!isCollectionsMinimized && (
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-2 flex-wrap items-center justify-center md:justify-start">
+                  <Button
+                    onClick={loadSavedPolicies}
+                    variant="outline"
+                    size="sm"
+                  >
+                    Load Policy Scripts
+                  </Button>
+                  <Button
+                    onClick={() => setUploadDialogOpen(true)}
+                    variant="outline"
+                    size="sm"
+                  >
+                    Upload Policy Script
+                  </Button>
+                  <span className="text-sm text-muted-foreground text-center">
+                    {savedPolicies.length} collection(s) saved
+                  </span>
+                </div>
 
-              {savedPolicies.length > 0 && (
-                <div className="space-y-2">
-                  {savedPolicies.map((policy: any, index: number) => (
-                    <Card key={index}>
-                      <CardContent className="p-4">
-                        <div className="space-y-4">
-                          <div className="flex items-center gap-2 justify-between">
-                            <h3 className="font-semibold truncate">
-                              {policy.collectionName}
-                            </h3>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleDownloadPolicy(policy)}
-                                className="h-8 w-8 p-0"
-                                title="Download policy script"
-                              >
-                                <Download className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  handleDeletePolicy(policy.policyId)
-                                }
-                                className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                title="Delete policy script"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                {savedPolicies.length > 0 && (
+                  <div className="space-y-2">
+                    {savedPolicies.map((policy: any, index: number) => (
+                      <Card key={index}>
+                        <CardContent className="p-4">
+                          <div className="space-y-4">
+                            <div className="flex items-center gap-2 justify-between">
+                              <h3 className="font-semibold truncate">
+                                {policy.collectionName}
+                              </h3>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleDownloadPolicy(policy)}
+                                  className="h-8 w-8 p-0"
+                                  title="Download policy script"
+                                >
+                                  <Download className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() =>
+                                    handleDeletePolicy(policy.policyId)
+                                  }
+                                  className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                  title="Delete policy script"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-xs text-muted-foreground truncate">
+                                <strong>Policy ID:</strong> {policy.policyId}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                <strong>Tx Hash:</strong>{" "}
+                                {policy.txHash.slice(0, 8)}...
+                                {policy.txHash.slice(-8)}
+                              </p>
                             </div>
                           </div>
-                          <div className="space-y-1">
-                            <p className="text-xs text-muted-foreground truncate">
-                              <strong>Policy ID:</strong> {policy.policyId}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              <strong>Tx Hash:</strong>{" "}
-                              {policy.txHash.slice(0, 8)}...
-                              {policy.txHash.slice(-8)}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
 
-              {savedPolicies.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  No collections saved yet. Create your first collection to see
-                  it here.
-                </p>
-              )}
-            </CardContent>
-          )}
-        </Card>
+                {savedPolicies.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    no policy scripts found
+                  </p>
+                )}
+              </CardContent>
+            )}
+          </Card>
+        )}
 
         {/* Policy Script Upload Dialog */}
         <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
@@ -1434,8 +1877,8 @@ export default function MintingInterface() {
             <DialogHeader>
               <DialogTitle>Upload Policy Script</DialogTitle>
               <DialogDescription>
-                Upload a policy script JSON file to restore a collection's
-                burning capability.
+                Upload a .json file with information needed to mint/burn NFTs
+                with a specific policy id.
               </DialogDescription>
             </DialogHeader>
 
@@ -1504,7 +1947,7 @@ export default function MintingInterface() {
           handleBurnNFT={handleBurnNFT}
           setBurnResult={setBurnResult}
           setIsBurning={setIsBurning}
-          walletInfo={walletInfo}
+          walletInfo={{ assets: enhancedAssets, networkId: network }}
         />
       </div>
     </div>

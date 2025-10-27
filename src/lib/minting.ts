@@ -1,5 +1,4 @@
 import {
-  MeshWallet,
   MeshTxBuilder,
   ForgeScript,
   BlockfrostProvider,
@@ -7,14 +6,13 @@ import {
   resolveScriptHash,
   stringToHex,
 } from "@meshsdk/core";
-import type { NativeScript } from "@meshsdk/core";
+import type { NativeScript, IWallet } from "@meshsdk/core";
 import { getDefaultMetadata } from "./metadata";
 import { getDefaultRecipients, createRecipients } from "./recipients";
 
 const networkId = 0; // 0 for testnet, 1 for mainnet
 const blockfrostKey =
   process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY || "BLOCKFROST_KEY_HERE";
-const seedPhrase = process.env.NEXT_PUBLIC_SEED_PHRASE || "";
 
 // Function to get a safe future slot number
 const getFutureSlot = async (
@@ -34,14 +32,6 @@ const getFutureSlot = async (
     return 300000000;
   }
 };
-
-console.log("Blockfrost Key:", blockfrostKey);
-console.log("Seed Phrase:", seedPhrase);
-console.log("Network ID:", networkId);
-
-if (!seedPhrase) {
-  throw new Error("NEXT_PUBLIC_SEED_PHRASE environment variable is required");
-}
 
 // Define the proper NFT metadata type
 type AssetMetadata = {
@@ -84,6 +74,7 @@ function get721Metadata(
 }
 
 export async function mintNFTs(
+  wallet: IWallet,
   collectionName?: string,
   customMetadata?: any,
   customRecipients?: string[],
@@ -93,21 +84,6 @@ export async function mintNFTs(
   try {
     // Initialize blockchain provider
     const provider = new BlockfrostProvider(blockfrostKey);
-
-    // Initialize wallet with seed phrase
-    const wallet = new MeshWallet({
-      networkId: networkId,
-      fetcher: provider,
-      submitter: provider,
-      key: {
-        type: "mnemonic",
-        words: seedPhrase.split(" "),
-      },
-    });
-
-    // Initialize the wallet
-    await wallet.init();
-    console.log("Wallet initialized successfully");
 
     const address = await wallet.getChangeAddress();
     const utxos = await wallet.getUtxos();
@@ -302,6 +278,7 @@ export function hasPolicyScript(policyId: string): boolean {
 
 // Function to mint to existing collection
 export async function mintToExistingCollection(
+  wallet: IWallet,
   policyId: string,
   collectionName: string,
   customMetadata?: any,
@@ -321,21 +298,6 @@ export async function mintToExistingCollection(
 
     // Initialize blockchain provider
     const provider = new BlockfrostProvider(blockfrostKey);
-
-    // Initialize wallet with seed phrase
-    const wallet = new MeshWallet({
-      networkId: networkId,
-      fetcher: provider,
-      submitter: provider,
-      key: {
-        type: "mnemonic",
-        words: seedPhrase.split(" "),
-      },
-    });
-
-    // Initialize the wallet
-    await wallet.init();
-    console.log("Wallet initialized successfully");
 
     const address = await wallet.getChangeAddress();
     const utxos = await wallet.getUtxos();
@@ -463,108 +425,9 @@ export async function mintToExistingCollection(
   }
 }
 
-export async function getWalletBalance() {
-  try {
-    const provider = new BlockfrostProvider(blockfrostKey);
-
-    const wallet = new MeshWallet({
-      networkId: networkId,
-      fetcher: provider,
-      submitter: provider,
-      key: {
-        type: "mnemonic",
-        words: seedPhrase.split(" "),
-      },
-    });
-
-    // Initialize the wallet
-    await wallet.init();
-
-    const balance = await wallet.getBalance();
-    return balance;
-  } catch (error) {
-    console.error("Failed to get balance:", error);
-    return null;
-  }
-}
-
-// New function to get wallet information
-export async function getWalletInfo() {
-  try {
-    const provider = new BlockfrostProvider(blockfrostKey);
-
-    const wallet: any = new MeshWallet({
-      networkId: 0,
-      fetcher: provider,
-      submitter: provider,
-      key: {
-        type: "mnemonic",
-        words: seedPhrase.split(" "),
-      },
-    });
-
-    await wallet.init();
-
-    const address = await wallet.getChangeAddress();
-    const balance = await wallet.getBalance();
-    const networkId = await wallet.getNetworkId();
-    const lovelace = await wallet.getLovelace();
-    const assets = await wallet.getAssets();
-
-    // Fetch metadata for each asset
-    const assetsWithMetadata = await Promise.all(
-      assets.map(async (asset: any) => {
-        try {
-          const metadata = await provider.fetchAssetMetadata(asset.unit);
-
-          let imageUrl = null;
-          if (metadata?.image) {
-            imageUrl = metadata.image.startsWith("ipfs://")
-              ? `https://ipfs.io/ipfs/${metadata.image.replace("ipfs://", "")}`
-              : metadata.image;
-          } else if (
-            metadata?.files &&
-            metadata.files.length > 0 &&
-            metadata.files[0].src
-          ) {
-            const fileSrc = metadata.files[0].src;
-            imageUrl = fileSrc.startsWith("ipfs://")
-              ? `https://ipfs.io/ipfs/${fileSrc.replace("ipfs://", "")}`
-              : fileSrc;
-          }
-
-          return {
-            ...asset,
-            metadata,
-            image: imageUrl,
-          };
-        } catch (error) {
-          console.log(`No metadata found for asset ${asset.assetName}`);
-          return {
-            ...asset,
-            image:
-              "https://pbs.twimg.com/profile_images/1969705385977114625/Cnw3WAAr_400x400.jpg",
-          };
-        }
-      })
-    );
-
-    return {
-      address,
-      balance,
-      networkId,
-      lovelace,
-      assets: assetsWithMetadata,
-      networkName: networkId === 0 ? "Testnet" : "Mainnet",
-    };
-  } catch (error) {
-    console.error("Failed to get wallet info:", error);
-    return null;
-  }
-}
-
 // Function to burn NFTs
 export async function burnNFT(
+  wallet: IWallet,
   policyId: string,
   assetName: string,
   quantity: string = "1"
@@ -572,21 +435,6 @@ export async function burnNFT(
   try {
     // Initialize blockchain provider
     const provider = new BlockfrostProvider(blockfrostKey);
-
-    // Initialize wallet with seed phrase
-    const wallet = new MeshWallet({
-      networkId: networkId,
-      fetcher: provider,
-      submitter: provider,
-      key: {
-        type: "mnemonic",
-        words: seedPhrase.split(" "),
-      },
-    });
-
-    // Initialize the wallet
-    await wallet.init();
-    console.log("Wallet initialized successfully for burning");
 
     const address = await wallet.getChangeAddress();
     const utxos = await wallet.getUtxos();
