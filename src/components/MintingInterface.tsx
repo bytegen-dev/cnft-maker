@@ -951,21 +951,23 @@ export default function MintingInterface() {
                       </p>
                       <div className="flex items-center gap-2 mt-1">
                         <Coins className="h-4 w-4" />
-                        <span className="font-mono text-sm">
-                          {lovelace
-                            ? (parseInt(lovelace) / 1000000).toFixed(2)
-                            : "0.00"}
-                        </span>
-                        {adaPrice > 0 && (
-                          <span className="text-xs text-muted-foreground">
-                            ($
-                            {(
-                              (parseInt(lovelace || "0") / 1000000) *
-                              adaPrice
-                            ).toFixed(2)}
-                            )
+                        <div className="flex flex-col sm:flex-row gap-2 gap-y-0">
+                          <span className="font-mono text-sm">
+                            {lovelace
+                              ? (parseInt(lovelace) / 1000000).toFixed(2)
+                              : "0.00"}
                           </span>
-                        )}
+                          {adaPrice > 0 && (
+                            <span className="text-xs text-muted-foreground">
+                              ($
+                              {(
+                                (parseInt(lovelace || "0") / 1000000) *
+                                adaPrice
+                              ).toFixed(2)}
+                              )
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </CardContent>
                   </Card>

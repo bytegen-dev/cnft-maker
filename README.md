@@ -74,6 +74,7 @@ Open [http://localhost:3000](http://localhost:3000) to see the application.
 ## Recent Updates
 
 ### v2.1.0 - Network Tracking & Burn Fixes
+
 - ✅ **Network-aware Policy Scripts** - Policy scripts now track preprod/mainnet
 - ✅ **Automatic Network Detection** - Uses correct Blockfrost API keys based on wallet network
 - ✅ **Burn Transaction Fixes** - Resolved UTXO balance and asset name encoding issues
@@ -83,6 +84,7 @@ Open [http://localhost:3000](http://localhost:3000) to see the application.
 - ✅ **UI Improvements** - Network indicators, persistent settings, better UX
 
 ### v2.0.0 - Browser Wallet Integration
+
 - ✅ **Browser Wallet Support** - Connect with Nami, Eternl, Flint, etc.
 - ✅ **Mesh React Hooks** - Modern wallet integration
 - ✅ **Real-time Balance** - Live ADA balance and price display
