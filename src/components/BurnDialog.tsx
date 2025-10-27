@@ -22,7 +22,7 @@ interface BurnDialogProps {
   onBurn: (asset: any) => void;
   onClose: () => void;
   walletInfo: any;
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 export function BurnDialog({
@@ -38,7 +38,7 @@ export function BurnDialog({
 }: BurnDialogProps) {
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
+      {children && <DialogTrigger asChild>{children}</DialogTrigger>}
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Burn NFT</DialogTitle>

@@ -55,9 +55,9 @@ export function NFTCard({
         <div className="space-y-3 flex-1">
           {/* NFT Image */}
           <div className="aspect-square bg-white rounded-lg overflow-hidden border">
-            {nft.image ? (
+            {nft.imageUrl || nft.image ? (
               <img
-                src={nft.image}
+                src={nft.imageUrl || nft.image}
                 alt={nft.assetName || "NFT"}
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                 onError={(e) => {
@@ -69,13 +69,11 @@ export function NFTCard({
                   }
                 }}
               />
-            ) : null}
-            <div
-              className="w-full h-full bg-muted flex items-center justify-center text-muted-foreground"
-              style={{ display: nft.image ? "none" : "flex" }}
-            >
-              <Image className="h-12 w-12" />
-            </div>
+            ) : (
+              <div className="w-full h-full bg-muted flex items-center justify-center text-muted-foreground">
+                <Image className="h-12 w-12" />
+              </div>
+            )}
           </div>
 
           {/* NFT Info */}

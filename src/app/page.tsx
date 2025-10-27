@@ -1,10 +1,13 @@
+"use client";
+
 import MintingInterface from "@/components/MintingInterface";
 import LightRays from "@/components/LightRays";
 import { Footer } from "@/components/Footer";
+import { MeshProvider } from "@meshsdk/react";
 
 export default function Home() {
   return (
-    <>
+    <MeshProvider>
       <div className="fixed top-0 left-0 w-full h-full z-0 bg-black">
         <LightRays
           raysOrigin="top-center"
@@ -22,9 +25,9 @@ export default function Home() {
       <div className="bg-black/10 h-full fixed top-0 left-0 w-full z-10 overflow-y-auto">
         <div className="min-h-screen container mx-auto px-4 py-8 pb-32">
           <div className="text-center mb-8 space-y-2">
-            <h2 className="text-3xl font-bold text-white">NFT Maker</h2>
+            <h2 className="text-3xl font-bold text-white">CNFT Maker</h2>
             <p className="text-muted-foreground">
-              mint-cip25-nfts with verifiable credentials.
+              mint-cip25/68-nfts with verifiable credentials (WIP)
             </p>
           </div>
 
@@ -32,6 +35,6 @@ export default function Home() {
           <Footer />
         </div>
       </div>
-    </>
+    </MeshProvider>
   );
 }

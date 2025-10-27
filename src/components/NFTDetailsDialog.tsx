@@ -82,9 +82,9 @@ export function NFTDetailsDialog({
             <div className="flex gap-4">
               {/* Compact NFT Image */}
               <div className="w-20 h-20 bg-white rounded-lg overflow-hidden border flex-shrink-0">
-                {selectedNft.image ? (
+                {selectedNft.imageUrl || selectedNft.image ? (
                   <img
-                    src={selectedNft.image}
+                    src={selectedNft.imageUrl || selectedNft.image}
                     alt={selectedNft.assetName || "NFT"}
                     className="w-full h-full object-cover"
                     onError={(e) => {
@@ -96,13 +96,11 @@ export function NFTDetailsDialog({
                       }
                     }}
                   />
-                ) : null}
-                <div
-                  className="w-full h-full bg-muted flex items-center justify-center text-muted-foreground"
-                  style={{ display: selectedNft.image ? "none" : "flex" }}
-                >
-                  <Image className="h-8 w-8" />
-                </div>
+                ) : (
+                  <div className="w-full h-full bg-muted flex items-center justify-center text-muted-foreground">
+                    <Image className="h-8 w-8" />
+                  </div>
+                )}
               </div>
 
               {/* Basic Info */}
