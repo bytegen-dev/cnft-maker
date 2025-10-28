@@ -13,6 +13,7 @@ import { Editor } from "@monaco-editor/react";
 import { BurnDialog } from "./BurnDialog";
 import { Separator } from "@/components/ui/separator";
 import { FaTelegram, FaXTwitter } from "react-icons/fa6";
+import { CopyButton } from "@/components/ui/copy-button";
 
 interface NFTDetailsDialogProps {
   isOpen: boolean;
@@ -72,7 +73,7 @@ export function NFTDetailsDialog({
 
   return (
     <Dialog open={isOpen && !burnDialogOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl overflow-y-auto max-h-[90vh]">
+      <DialogContent className="max-w-4xl overflow-y-auto max-h-[90vh]">
         <DialogHeader>
           <DialogTitle>NFT Details</DialogTitle>
           <DialogDescription>
@@ -134,32 +135,46 @@ export function NFTDetailsDialog({
               </h4>
 
               <div className="grid grid-cols-1 gap-3">
-                <div className="flex justify-between items-start">
-                  <span className="text-sm font-medium">Asset Name:</span>
-                  <span className="text-sm text-muted-foreground font-mono text-right max-w-xs truncate">
-                    {selectedNft.assetName}
+                <div className="flex justify-between items-center gap-2">
+                  <span className="text-sm font-medium min-w-fit">
+                    Asset Name:
                   </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground font-mono text-right max-w-[220px] truncate">
+                      {selectedNft.assetName}
+                    </span>
+                    <CopyButton text={selectedNft.assetName} />
+                  </div>
                 </div>
 
-                <div className="flex justify-between items-start">
+                <div className="flex justify-between items-center gap-2">
                   <span className="text-sm font-medium">Policy ID:</span>
-                  <span className="text-sm text-muted-foreground font-mono text-right max-w-xs truncate">
-                    {selectedNft.policyId}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground font-mono text-right max-w-[220px] truncate">
+                      {selectedNft.policyId}
+                    </span>
+                    <CopyButton text={selectedNft.policyId} />
+                  </div>
                 </div>
 
-                <div className="flex justify-between items-start">
+                <div className="flex justify-between items-center gap-2">
                   <span className="text-sm font-medium">Fingerprint:</span>
-                  <span className="text-sm text-muted-foreground font-mono text-right max-w-xs truncate">
-                    {selectedNft.fingerprint}
-                  </span>
+                  <div className="flex items-center gap-2 w-full justify-end">
+                    <span className="text-sm text-muted-foreground font-mono text-right max-w-[220px] truncate">
+                      {selectedNft.fingerprint}
+                    </span>
+                    <CopyButton text={selectedNft.fingerprint} />
+                  </div>
                 </div>
 
-                <div className="flex justify-between items-start">
+                <div className="flex justify-between items-center gap-2">
                   <span className="text-sm font-medium">Unit:</span>
-                  <span className="text-sm text-muted-foreground font-mono text-right max-w-xs truncate">
-                    {selectedNft.unit}
-                  </span>
+                  <div className="flex items-center gap-2 w-full justify-end">
+                    <span className="text-sm text-muted-foreground font-mono text-right max-w-[220px] truncate">
+                      {selectedNft.unit}
+                    </span>
+                    <CopyButton text={selectedNft.unit} />
+                  </div>
                 </div>
               </div>
             </div>
@@ -175,25 +190,45 @@ export function NFTDetailsDialog({
 
                 {/* Credential Details - Always show critical fields */}
                 <div className="grid grid-cols-1 gap-3">
-                  <div className="flex justify-between items-start">
-                    <span className="text-sm font-medium">Credential ID:</span>
-                    <span className="text-sm text-muted-foreground font-mono text-right max-w-xs truncate">
-                      {selectedNft.metadata.credentials.credentialId || "-"}
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium min-w-fit">
+                      Credential ID:
                     </span>
+                    <div className="flex items-center gap-2 w-full justify-end">
+                      <span className="text-sm text-muted-foreground font-mono text-right max-w-[220px] truncate">
+                        {selectedNft.metadata.credentials.credentialId || "-"}
+                      </span>
+                      {selectedNft.metadata.credentials.credentialId && (
+                        <CopyButton
+                          text={selectedNft.metadata.credentials.credentialId}
+                        />
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex justify-between items-start">
-                    <span className="text-sm font-medium">Issued by:</span>
-                    <span className="text-sm text-muted-foreground text-right max-w-xs truncate">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium min-w-fit">
+                      Issued by:
+                    </span>
+                    <span className="text-sm text-muted-foreground text-right max-w-[220px] truncate">
                       {selectedNft.metadata.credentials.issuer?.name || "-"}
                     </span>
                   </div>
 
-                  <div className="flex justify-between items-start">
-                    <span className="text-sm font-medium">Signature:</span>
-                    <span className="text-sm text-muted-foreground font-mono text-right max-w-xs truncate">
-                      {selectedNft.metadata.credentials.signature || "-"}
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium min-w-fit">
+                      Signature:
                     </span>
+                    <div className="flex items-center gap-2 w-full justify-end">
+                      <span className="text-sm text-muted-foreground font-mono text-right max-w-[220px] truncate">
+                        {selectedNft.metadata.credentials.signature || "-"}
+                      </span>
+                      {selectedNft.metadata.credentials.signature && (
+                        <CopyButton
+                          text={selectedNft.metadata.credentials.signature}
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -308,14 +343,14 @@ export function NFTDetailsDialog({
               <div className="space-y-2">
                 <details className="group">
                   <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
-                    Full Metadata
+                    ASSET INFORMATION
                   </summary>
                   <div className="mt-2 border rounded-md overflow-hidden">
                     <Editor
                       height="200px"
                       defaultLanguage="json"
                       theme="vs-dark"
-                      value={JSON.stringify(selectedNft.metadata, null, 2)}
+                      value={JSON.stringify(selectedNft, null, 2)}
                       options={{
                         readOnly: true,
                         minimap: { enabled: false },

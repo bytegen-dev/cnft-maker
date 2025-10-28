@@ -10,7 +10,7 @@ export const getDefaultMetadata = (
   collectionId?: string,
   metadataStandard: MetadataStandard = METADATA_STANDARDS.BASIC
 ): { [assetName: string]: any } => {
-  const collection = collectionName || "Default Collection";
+  const collection = collectionName || "Default";
   const id = collectionId || Date.now().toString();
 
   // Get template based on standard
@@ -26,18 +26,15 @@ export const getDefaultMetadata = (
 
     result[assetName] = {
       ...(template as any)[key],
-      artist: "This NFT was minted by Isaac (https://bytegen.dev/)",
     };
   });
 
   return result;
 };
 
-// Metadata template for adding to existing collections
 export const getExistingCollectionMetadata = (
   collectionName: string
 ): { [assetName: string]: any } => {
-  const artist = "This NFT was minted by Isaac (https://bytegen.dev/)";
   const id = Date.now().toString();
 
   return {
@@ -46,11 +43,9 @@ export const getExistingCollectionMetadata = (
       image: "ipfs://QmRm6VH1SKtNcfXDYHvUqeU3JLCHeRs8h8if3bN62fEULq",
       mediaType: "image/jpg",
       description: "A unique digital collectible from the collection.",
-      artist,
       collection: collectionName,
     },
   };
 };
 
-// Legacy export for backward compatibility
 export const metadata = getDefaultMetadata();

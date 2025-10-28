@@ -174,14 +174,6 @@ export default function MintingInterface() {
   } | null>(null);
   const [nftDetailsDialogOpen, setNftDetailsDialogOpen] = useState(false);
   const [selectedNft, setSelectedNft] = useState<any>(null);
-  const [galleryFilter, setGalleryFilter] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem("galleryFilter");
-      return saved || "all";
-    } catch {
-      return "all";
-    }
-  });
   const [gallerySearch, setGallerySearch] = useState<string>(() => {
     try {
       const saved = localStorage.getItem("gallerySearch");
@@ -417,10 +409,6 @@ export default function MintingInterface() {
   }, [nftViewMode]);
 
   useEffect(() => {
-    localStorage.setItem("galleryFilter", galleryFilter);
-  }, [galleryFilter]);
-
-  useEffect(() => {
     localStorage.setItem("gallerySearch", gallerySearch);
   }, [gallerySearch]);
 
@@ -579,18 +567,6 @@ export default function MintingInterface() {
     setSavedPolicies(uniquePolicies);
   };
 
-  // Get unique collections from wallet assets
-  const getUniqueCollections = () => {
-    if (!enhancedAssets) return [];
-    const collections = new Set<string>();
-    enhancedAssets.forEach((asset: any) => {
-      if (asset.metadata?.collection) {
-        collections.add(asset.metadata.collection);
-      }
-    });
-    return Array.from(collections).sort();
-  };
-
   const refreshAssets = async () => {
     const newAssets = await wallet?.getAssets();
     if (!newAssets) return;
@@ -599,18 +575,11 @@ export default function MintingInterface() {
     );
   };
 
-  // Filter NFTs based on selected collection and search term
+  // Filter NFTs based on search term
   const getFilteredNFTs = () => {
     if (!enhancedAssets) return [];
 
     let filtered = enhancedAssets;
-
-    // Filter by collection
-    if (galleryFilter !== "all") {
-      filtered = filtered.filter(
-        (asset: any) => asset.metadata?.collection === galleryFilter
-      );
-    }
 
     // Filter by search term
     if (gallerySearch.trim()) {
@@ -1021,11 +990,7 @@ export default function MintingInterface() {
                   NFT Gallery{" "}
                   {enhancedAssets &&
                     enhancedAssets.length > 0 &&
-                    `(${getFilteredNFTs().length}${
-                      galleryFilter !== "all"
-                        ? ` of ${enhancedAssets.length}`
-                        : ""
-                    })`}
+                    `(${getFilteredNFTs().length})`}
                 </CardTitle>
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1 border rounded-md">
@@ -1085,10 +1050,10 @@ export default function MintingInterface() {
                     </div>
                   ) : enhancedAssets && enhancedAssets.length > 0 ? (
                     <div className="space-y-4">
-                      {/* Search and Filter Controls */}
-                      <div className="flex items-center gap-4 flex-col md:flex-row md:justify-between">
+                      {/* Search Controls */}
+                      <div className="flex items-center gap-4 flex-col md:flex-row md:justify-start">
                         {/* Search Bar */}
-                        <div className="flex-1 relative w-full md:max-w-[250px]">
+                        <div className="flex-1 relative w-full">
                           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                           <Input
                             placeholder="Search by policyId, assetName, metadata..."
@@ -1096,38 +1061,6 @@ export default function MintingInterface() {
                             onChange={(e) => setGallerySearch(e.target.value)}
                             className="pl-10"
                           />
-                        </div>
-
-                        {/* Collection Filter */}
-                        <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-1">
-                            <Label
-                              htmlFor="collection-filter"
-                              className="text-sm font-medium whitespace-nowrap"
-                            >
-                              Collection:
-                            </Label>
-                          </div>
-                          <Select
-                            value={galleryFilter}
-                            onValueChange={setGalleryFilter}
-                          >
-                            <SelectTrigger className="w-48">
-                              <SelectValue placeholder="Select collection..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">
-                                All Collections
-                              </SelectItem>
-                              {getUniqueCollections().map(
-                                (collection: string, index: number) => (
-                                  <SelectItem key={index} value={collection}>
-                                    {collection}
-                                  </SelectItem>
-                                )
-                              )}
-                            </SelectContent>
-                          </Select>
                         </div>
                       </div>
 
@@ -1343,8 +1276,7 @@ export default function MintingInterface() {
                       onValueChange={(value: MetadataStandard) => {
                         setMetadataStandard(value);
                         // Update metadata when standard changes - use the new value directly
-                        const collection =
-                          collectionName || "Default Collection";
+                        const collection = collectionName;
                         const updatedMetadata = getDefaultMetadata(
                           collection,
                           Date.now().toString(),
@@ -1624,7 +1556,7 @@ export default function MintingInterface() {
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center">
                       <Label htmlFor="metadata-editor">
-                        Edit NFT Metadata (JSON)
+                        NFT Metadata (JSON)
                       </Label>
                     </div>
                     <div className="flex items-center gap-2">
