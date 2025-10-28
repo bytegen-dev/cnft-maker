@@ -65,6 +65,7 @@ import {
   getDefaultMetadata,
   getExistingCollectionMetadata,
 } from "@/lib/metadata";
+import { METADATA_STANDARDS, type MetadataStandard } from "@/lib/constants";
 import { uploadToIPFS } from "@/lib/pinata";
 import Editor from "@monaco-editor/react";
 import { NFTCard } from "./NFTCard";
@@ -97,9 +98,26 @@ export default function MintingInterface() {
     message: string;
   } | null>(null);
   const [collectionName, setCollectionName] = useState("");
+  const [metadataStandard, setMetadataStandard] = useState<MetadataStandard>(
+    () => {
+      try {
+        const saved = localStorage.getItem("metadataStandard");
+        return saved === METADATA_STANDARDS.BASIC ||
+          saved === METADATA_STANDARDS.DEVELOPER_IDENTITY
+          ? (saved as MetadataStandard)
+          : METADATA_STANDARDS.BASIC;
+      } catch {
+        return METADATA_STANDARDS.BASIC;
+      }
+    }
+  );
   const [nftMetadata, setNftMetadata] = useState(
     JSON.stringify(
-      getDefaultMetadata(collectionName, Date.now().toString()),
+      getDefaultMetadata(
+        collectionName,
+        Date.now().toString(),
+        metadataStandard
+      ),
       null,
       2
     )
@@ -417,6 +435,10 @@ export default function MintingInterface() {
   useEffect(() => {
     localStorage.setItem("mintMode", mintMode);
   }, [mintMode]);
+
+  useEffect(() => {
+    localStorage.setItem("metadataStandard", metadataStandard);
+  }, [metadataStandard]);
 
   // Update metadata when selectedPolicy changes and we have saved policies
   useEffect(() => {
@@ -796,10 +818,11 @@ export default function MintingInterface() {
       // Use existing collection metadata format
       updatedMetadata = getExistingCollectionMetadata(newCollectionName);
     } else {
-      // Use new collection metadata format
+      // Use new collection metadata format with selected standard
       updatedMetadata = getDefaultMetadata(
         newCollectionName,
-        Date.now().toString()
+        Date.now().toString(),
+        metadataStandard
       );
     }
 
@@ -1277,37 +1300,86 @@ export default function MintingInterface() {
                 <Coins className="h-5 w-5" />
                 Mint NFTs
               </div>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="mint-mode">Mint Mode:</Label>
-                <Select
-                  value={mintMode}
-                  onValueChange={(value: "new" | "existing") => {
-                    setMintMode(value);
-                    if (value === "existing") {
-                      loadSavedPolicies();
-                      // Set collection name from selected policy if available
-                      if (selectedPolicy && savedPolicies.length > 0) {
-                        const policy = savedPolicies.find(
-                          (p) => p.policyId === selectedPolicy
-                        );
-                        if (policy) {
-                          setCollectionName(policy.collectionName);
+              <div className="flex items-center justify-between w-full gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="mint-mode">Mint Mode:</Label>
+                  <Select
+                    value={mintMode}
+                    onValueChange={(value: "new" | "existing") => {
+                      setMintMode(value);
+                      if (value === "existing") {
+                        loadSavedPolicies();
+                        // Set collection name from selected policy if available
+                        if (selectedPolicy && savedPolicies.length > 0) {
+                          const policy = savedPolicies.find(
+                            (p) => p.policyId === selectedPolicy
+                          );
+                          if (policy) {
+                            setCollectionName(policy.collectionName);
+                          }
                         }
                       }
-                    }
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select mint mode..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="new">New Collection</SelectItem>
-                    <SelectItem value="existing">Add to Existing</SelectItem>
-                  </SelectContent>
-                </Select>
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select mint mode..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="new">New Collection</SelectItem>
+                      <SelectItem value="existing">Add to Existing</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {mintMode === "new" && (
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="metadata-standard">
+                      Metadata Standard:
+                    </Label>
+                    <Select
+                      value={metadataStandard}
+                      onValueChange={(value: MetadataStandard) => {
+                        setMetadataStandard(value);
+                        // Update metadata when standard changes - use the new value directly
+                        const collection =
+                          collectionName || "Default Collection";
+                        const updatedMetadata = getDefaultMetadata(
+                          collection,
+                          Date.now().toString(),
+                          value // Use the new standard value
+                        );
+                        setNftMetadata(
+                          JSON.stringify(updatedMetadata, null, 2)
+                        );
+
+                        // Update custom recipients to match the number of assets
+                        const assetCount = Object.keys(updatedMetadata).length;
+                        setCustomRecipients((prev) => {
+                          const newArray = new Array(assetCount).fill("");
+                          return newArray.map((_, index) => prev[index] || "");
+                        });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select standard..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={METADATA_STANDARDS.BASIC}>
+                          Basic
+                        </SelectItem>
+                        <SelectItem
+                          value={METADATA_STANDARDS.DEVELOPER_IDENTITY}
+                        >
+                          Developer Identity
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
             </CardTitle>
           </CardHeader>
+          <Separator className="-mt-4 -mb-2" />
           <CardContent className="space-y-4">
             {/* <Separator className="mb-6" /> */}
 
@@ -1541,7 +1613,11 @@ export default function MintingInterface() {
 
                 <p className="text-muted-foreground">
                   {mintMode === "new"
-                    ? "Create a new collection with NFTs based on your metadata JSON."
+                    ? `Create a new collection with NFTs based on your metadata JSON using the ${
+                        metadataStandard === METADATA_STANDARDS.BASIC
+                          ? "Basic"
+                          : "Developer Identity"
+                      } standard.`
                     : "Add NFTs to the selected existing collection based on your metadata JSON."}
                 </p>
 

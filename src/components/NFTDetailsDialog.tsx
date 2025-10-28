@@ -8,9 +8,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Flame, Image } from "lucide-react";
+import { Flame, Image, Github, Globe, CheckCircle } from "lucide-react";
 import { Editor } from "@monaco-editor/react";
 import { BurnDialog } from "./BurnDialog";
+import { Separator } from "@/components/ui/separator";
+import { FaTelegram, FaXTwitter } from "react-icons/fa6";
 
 interface NFTDetailsDialogProps {
   isOpen: boolean;
@@ -70,7 +72,7 @@ export function NFTDetailsDialog({
 
   return (
     <Dialog open={isOpen && !burnDialogOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl overflow-y-auto max-h-[90vh]">
         <DialogHeader>
           <DialogTitle>NFT Details</DialogTitle>
           <DialogDescription>
@@ -161,6 +163,145 @@ export function NFTDetailsDialog({
                 </div>
               </div>
             </div>
+
+            <Separator />
+
+            {/* Credentials Section */}
+            {selectedNft.metadata?.credentials && (
+              <div className="space-y-3">
+                <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">
+                  Credentials
+                </h4>
+
+                {/* Credential Details - Always show critical fields */}
+                <div className="grid grid-cols-1 gap-3">
+                  <div className="flex justify-between items-start">
+                    <span className="text-sm font-medium">Credential ID:</span>
+                    <span className="text-sm text-muted-foreground font-mono text-right max-w-xs truncate">
+                      {selectedNft.metadata.credentials.credentialId || "-"}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-start">
+                    <span className="text-sm font-medium">Issued by:</span>
+                    <span className="text-sm text-muted-foreground text-right max-w-xs truncate">
+                      {selectedNft.metadata.credentials.issuer?.name || "-"}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-start">
+                    <span className="text-sm font-medium">Signature:</span>
+                    <span className="text-sm text-muted-foreground font-mono text-right max-w-xs truncate">
+                      {selectedNft.metadata.credentials.signature || "-"}
+                    </span>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Connections */}
+                {selectedNft.metadata.credentials.connections &&
+                selectedNft.metadata.credentials.connections.length > 0 ? (
+                  <div className="space-y-2">
+                    <h5 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+                      Connections
+                    </h5>
+                    <div className="space-y-2">
+                      {selectedNft.metadata.credentials.connections.map(
+                        (connection: any, index: number) => (
+                          <div
+                            key={index}
+                            className="flex items-center justify-between p-2 border rounded-md"
+                          >
+                            <div className="flex items-center gap-2">
+                              {connection.name
+                                ?.toLowerCase()
+                                .includes("github") && (
+                                <Github className="h-4 w-4" />
+                              )}
+                              {connection.name
+                                ?.toLowerCase()
+                                .includes("twitter") ||
+                              connection.name?.toLowerCase().includes("x") ? (
+                                <FaXTwitter className="h-4 w-4" />
+                              ) : null}
+                              {connection.name
+                                ?.toLowerCase()
+                                .includes("website") ||
+                              connection.name?.toLowerCase().includes("web") ? (
+                                <Globe className="h-4 w-4" />
+                              ) : null}
+                              {connection.name
+                                ?.toLowerCase()
+                                .includes("telegram") && (
+                                <FaTelegram className="h-4 w-4" />
+                              )}
+                              <div className="flex flex-col">
+                                <span className="text-sm font-medium">
+                                  {connection.name || "Unknown Connection"}
+                                </span>
+                                {connection.id && (
+                                  <span className="text-xs text-muted-foreground">
+                                    ID: {connection.id}
+                                  </span>
+                                )}
+                                {connection.linked_identifier && (
+                                  <span className="text-xs text-muted-foreground">
+                                    Linked: {connection.linked_identifier}
+                                  </span>
+                                )}
+                                {connection.timestamp && (
+                                  <span className="text-xs text-muted-foreground">
+                                    {new Date(
+                                      connection.timestamp
+                                    ).toLocaleDateString()}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            {connection.url && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  window.open(connection.url, "_blank")
+                                }
+                                className="flex items-center gap-1"
+                              >
+                                Visit
+                              </Button>
+                            )}
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <h5 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+                      Connections
+                    </h5>
+                    <p className="text-sm text-muted-foreground">
+                      No connections found
+                    </p>
+                  </div>
+                )}
+
+                {/* Validate Button */}
+                <div className="pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled
+                    className="w-full"
+                    title="Credential validation coming soon"
+                  >
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    Validate Credentials
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* Full Metadata - Collapsible */}
             {selectedNft.metadata && (
