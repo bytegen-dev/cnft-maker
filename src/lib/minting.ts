@@ -5,8 +5,15 @@ import {
   deserializeAddress,
   resolveScriptHash,
   stringToHex,
+  CIP68_100,
+  CIP68_222,
+  metadataToCip68,
+  serializePlutusScript,
+  applyParamsToScript,
+  mTxOutRef,
+  mConStr0,
 } from "@meshsdk/core";
-import type { NativeScript, IWallet } from "@meshsdk/core";
+import type { NativeScript, IWallet, PlutusScript, UTxO } from "@meshsdk/core";
 import { getDefaultMetadata } from "./metadata";
 import { getDefaultRecipients, createRecipients } from "./recipients";
 
@@ -262,9 +269,6 @@ export async function mintNFTs(
         createdAt: new Date().toISOString(),
         txHash,
       },
-      message: `Collection "${
-        collectionName || "Default Collection"
-      }" minted successfully!`,
     };
   } catch (error) {
     console.error("Minting failed:", error);
@@ -272,6 +276,193 @@ export async function mintNFTs(
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred",
       message: "Minting failed. Please try again.",
+      policyScript: null,
+    };
+  }
+}
+
+// CIP68 minting function
+export async function mintNFTsCIP68(
+  wallet: IWallet,
+  collectionName?: string,
+  customMetadata?: any,
+  customRecipients?: string[],
+  useTimeLock: boolean = true,
+  timeLockEpochs: number = 10,
+  network: number = 0
+) {
+  try {
+    // Initialize blockchain provider with appropriate API key
+    const blockfrostKey = getBlockfrostKey(network);
+    const provider = new BlockfrostProvider(blockfrostKey);
+
+    const usedAddresses = await wallet.getUsedAddresses();
+    const address = usedAddresses[0];
+    
+    if (address === undefined) {
+      throw new Error("Address not found");
+    }
+
+    const utxos = await wallet.getUtxos();
+    if (!utxos || utxos.length <= 0) {
+      throw new Error("No UTxOs found in wallet");
+    }
+
+    // Generate a unique collection ID for this minting session
+    const collectionId = Date.now().toString();
+
+    // Use custom metadata if provided, otherwise use default
+    const metadataToUse =
+      customMetadata || getDefaultMetadata(collectionName, collectionId);
+
+    // Extract asset names from metadata
+    const assetNames = Object.keys(metadataToUse);
+
+    // Get recipients - use custom recipients if provided, otherwise use wallet address
+    const recipients = customRecipients
+      ? createRecipients(customRecipients, address, collectionId, assetNames)
+      : getDefaultRecipients(address, collectionId, assetNames);
+
+    // Get a safe future slot number
+    const futureSlot = await getFutureSlot(provider, timeLockEpochs);
+
+    // Create native script for policy
+    const nativeScript: NativeScript = useTimeLock
+      ? {
+          type: "all",
+          scripts: [
+            {
+              type: "before",
+              slot: futureSlot.toString(),
+            },
+            { type: "sig", keyHash: deserializeAddress(address).pubKeyHash },
+          ],
+        }
+      : {
+          type: "sig",
+          keyHash: deserializeAddress(address).pubKeyHash,
+        };
+
+    const forgeScript = ForgeScript.fromNativeScript(nativeScript);
+    const policyId = resolveScriptHash(forgeScript);
+
+    // Get collateral for CIP68 transactions
+    const collateral: UTxO = (await wallet.getCollateral())[0];
+    if (!collateral) {
+      throw new Error("No collateral found in wallet");
+    }
+
+    const changeAddress = await wallet.getChangeAddress();
+
+    // Initialize transaction builder
+    const txBuilder = new MeshTxBuilder({ 
+      fetcher: provider,
+      verbose: true 
+    });
+
+    // Create metadata structure for CIP68
+    const nftMetadata: {
+      [policyId: string]: {
+        [assetName: string]: any;
+      };
+    } = { [policyId]: {} };
+
+    // Process each asset for CIP68 minting
+    for (let recipient in recipients) {
+      const assetName = recipients[recipient];
+      const assetData = metadataToUse[assetName];
+      const tokenNameHex = stringToHex(assetName);
+
+      // Create CIP68 metadata
+      const userTokenMetadata = {
+        name: assetData?.name || assetName,
+        image: assetData?.image === "addimage" 
+          ? "https://pbs.twimg.com/profile_images/1969705385977114625/Cnw3WAAr_400x400.jpg"
+          : assetData?.image || "",
+        mediaType: assetData?.mediaType || "image/png",
+        description: assetData?.description || `CIP68 NFT: ${assetName}`,
+        collection: collectionName || "Default Collection",
+        ...assetData, // Include any additional custom fields
+      };
+
+      // Add CIP68 minting (both 100 and 222 tokens)
+      txBuilder
+        .mintPlutusScriptV2()
+        .mint("1", policyId, CIP68_100(tokenNameHex))
+        .mintingScript(forgeScript)
+        .mintRedeemerValue(mConStr0([]))
+        .mintPlutusScriptV2()
+        .mint("1", policyId, CIP68_222(tokenNameHex))
+        .mintingScript(forgeScript)
+        .mintRedeemerValue(mConStr0([]));
+
+      // Add metadata for CIP68
+      nftMetadata[policyId][assetName] = userTokenMetadata;
+    }
+
+    // Build and submit transaction
+    const unsignedTx = await txBuilder
+      .metadataValue(721, nftMetadata)
+      .changeAddress(changeAddress)
+      .invalidHereafter(futureSlot)
+      .selectUtxosFrom(utxos)
+      .txInCollateral(
+        collateral.input.txHash,
+        collateral.input.outputIndex,
+        collateral.output.amount,
+        collateral.output.address,
+      )
+      .complete();
+
+    const signedTx = await wallet.signTx(unsignedTx, true);
+    const txHash = await wallet.submitTx(signedTx);
+
+    // Save policy information to localStorage
+    const policyInfo = {
+      policyId,
+      collectionName: collectionName || "Default Collection",
+      nativeScript,
+      forgeScript: forgeScript.toString(),
+      network,
+      createdAt: new Date().toISOString(),
+      txHash,
+    };
+
+    const existingPolicies = getSavedPolicies();
+    const existingIndex = existingPolicies.findIndex(
+      (policy: any) => policy.policyId === policyId
+    );
+
+    if (existingIndex !== -1) {
+      existingPolicies[existingIndex] = policyInfo;
+    } else {
+      existingPolicies.push(policyInfo);
+    }
+
+    localStorage.setItem("nftPolicies", JSON.stringify(existingPolicies));
+
+    return {
+      success: true,
+      txHash,
+      policyId,
+      policyScript: {
+        policyId,
+        collectionName: collectionName || "Default Collection",
+        nativeScript,
+        forgeScript: forgeScript.toString(),
+        createdAt: new Date().toISOString(),
+        txHash,
+      },
+      message: `CIP68 Collection "${
+        collectionName || "Default Collection"
+      }" minted successfully!`,
+    };
+  } catch (error) {
+    console.error("CIP68 Minting failed:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+      message: "CIP68 Minting failed. Please try again.",
       policyScript: null,
     };
   }

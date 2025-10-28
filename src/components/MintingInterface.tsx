@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import {
   mintNFTs,
+  mintNFTsCIP68,
   getSavedPolicies,
   getSavedPoliciesForNetwork,
   mintToExistingCollection,
@@ -114,6 +115,14 @@ export default function MintingInterface() {
       return saved === "new" || saved === "existing" ? saved : "new";
     } catch {
       return "new";
+    }
+  });
+  const [metadataStandard, setMetadataStandard] = useState<"cip25" | "cip68">(() => {
+    try {
+      const saved = localStorage.getItem("metadataStandard");
+      return saved === "cip25" || saved === "cip68" ? saved : "cip25";
+    } catch {
+      return "cip25";
     }
   });
   const [customRecipients, setCustomRecipients] = useState<string[]>([
@@ -418,6 +427,10 @@ export default function MintingInterface() {
     localStorage.setItem("mintMode", mintMode);
   }, [mintMode]);
 
+  useEffect(() => {
+    localStorage.setItem("metadataStandard", metadataStandard);
+  }, [metadataStandard]);
+
   // Update metadata when selectedPolicy changes and we have saved policies
   useEffect(() => {
     if (selectedPolicy && savedPolicies.length > 0 && mintMode === "existing") {
@@ -478,15 +491,27 @@ export default function MintingInterface() {
         : undefined;
 
       if (mintMode === "new") {
-        result = await mintNFTs(
-          wallet,
-          collectionName,
-          parsedMetadata,
-          recipientsToUse,
-          useTimeLock,
-          timeLockEpochs,
-          network
-        );
+        if (metadataStandard === "cip68") {
+          result = await mintNFTsCIP68(
+            wallet,
+            collectionName,
+            parsedMetadata,
+            recipientsToUse,
+            useTimeLock,
+            timeLockEpochs,
+            network
+          );
+        } else {
+          result = await mintNFTs(
+            wallet,
+            collectionName,
+            parsedMetadata,
+            recipientsToUse,
+            useTimeLock,
+            timeLockEpochs,
+            network
+          );
+        }
       } else {
         if (!selectedPolicy) {
           setMintResult({
@@ -506,7 +531,11 @@ export default function MintingInterface() {
         );
       }
 
-      setMintResult(result);
+      setMintResult({
+        success: result.success,
+        txHash: result.txHash,
+        message: result.message || (result.success ? "Minting completed successfully!" : "Minting failed."),
+      });
 
       // Set policy script for download if it's a new collection
       if (result.success && (result as any).policyScript) {
@@ -1279,34 +1308,53 @@ export default function MintingInterface() {
                 <Coins className="h-5 w-5" />
                 Mint NFTs
               </div>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="mint-mode">Mint Mode:</Label>
-                <Select
-                  value={mintMode}
-                  onValueChange={(value: "new" | "existing") => {
-                    setMintMode(value);
-                    if (value === "existing") {
-                      loadSavedPolicies();
-                      // Set collection name from selected policy if available
-                      if (selectedPolicy && savedPolicies.length > 0) {
-                        const policy = savedPolicies.find(
-                          (p) => p.policyId === selectedPolicy
-                        );
-                        if (policy) {
-                          setCollectionName(policy.collectionName);
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="mint-mode">Mint Mode:</Label>
+                  <Select
+                    value={mintMode}
+                    onValueChange={(value: "new" | "existing") => {
+                      setMintMode(value);
+                      if (value === "existing") {
+                        loadSavedPolicies();
+                        // Set collection name from selected policy if available
+                        if (selectedPolicy && savedPolicies.length > 0) {
+                          const policy = savedPolicies.find(
+                            (p) => p.policyId === selectedPolicy
+                          );
+                          if (policy) {
+                            setCollectionName(policy.collectionName);
+                          }
                         }
                       }
-                    }
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select mint mode..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="new">New Collection</SelectItem>
-                    <SelectItem value="existing">Add to Existing</SelectItem>
-                  </SelectContent>
-                </Select>
+                    }}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="Select mint mode..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="new">New Collection</SelectItem>
+                      <SelectItem value="existing">Add to Existing</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="metadata-standard">Standard:</Label>
+                  <Select
+                    value={metadataStandard}
+                    onValueChange={(value: "cip25" | "cip68") => {
+                      setMetadataStandard(value);
+                    }}
+                  >
+                    <SelectTrigger className="w-32">
+                      <SelectValue placeholder="Select standard..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cip25">CIP-25</SelectItem>
+                      <SelectItem value="cip68">CIP-68</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </CardTitle>
           </CardHeader>
@@ -1543,7 +1591,11 @@ export default function MintingInterface() {
 
                 <p className="text-muted-foreground">
                   {mintMode === "new"
-                    ? "Create a new collection with NFTs based on your metadata JSON."
+                    ? `Create a new ${metadataStandard.toUpperCase()} collection with NFTs based on your metadata JSON.${
+                        metadataStandard === "cip68" 
+                          ? " CIP-68 creates both reference and user tokens." 
+                          : ""
+                      }`
                     : "Add NFTs to the selected existing collection based on your metadata JSON."}
                 </p>
 
@@ -1644,11 +1696,11 @@ export default function MintingInterface() {
                     <>
                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
                       {mintMode === "new"
-                        ? "Creating Collection..."
+                        ? `Creating ${metadataStandard.toUpperCase()} Collection...`
                         : "Adding to Collection..."}
                     </>
                   ) : mintMode === "new" ? (
-                    "Create Collection"
+                    `Create ${metadataStandard.toUpperCase()} Collection`
                   ) : (
                     "Add to Collection"
                   )}
