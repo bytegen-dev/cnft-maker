@@ -12,24 +12,23 @@ export const METADATA_TEMPLATES = {
   [METADATA_STANDARDS.BASIC]: {
     NFT_01: {
       name: "NFT #1",
-      image: "addimage",
+      image: "ipfs://Qmcw8RoZSK8VaN8aKw6ViqrZEd9Ddzz7cXCBQfWVbZBY7Q",
       mediaType: "image/png",
       description: "A unique digital collectible from the collection.",
-      collection: "Default Collection",
-    },
-    NFT_02: {
-      name: "NFT #2",
-      image: "addimage",
-      mediaType: "image/png",
-      description: "A unique digital collectible from the collection.",
-      collection: "Default Collection",
-    },
-    NFT_03: {
-      name: "NFT #3",
-      image: "addimage",
-      mediaType: "image/png",
-      description: "A unique digital collectible from the collection.",
-      collection: "Default Collection",
+      traits: [
+        {
+          trait_type: "trait-type",
+          value: "trait-value",
+        },
+        {
+          trait_type: "trait-type",
+          value: "trait-value",
+        },
+        {
+          trait_type: "trait-type",
+          value: "trait-value",
+        },
+      ],
     },
   },
   [METADATA_STANDARDS.DEVELOPER_IDENTITY]: {

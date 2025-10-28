@@ -27,7 +27,7 @@ export default function Home() {
           <div className="text-center mb-8 space-y-2">
             <h2 className="text-3xl font-bold text-white">CNFT Maker</h2>
             <p className="text-muted-foreground">
-              mint-cip25/68-nfts with verifiable credentials (WIP)
+              mint-cip-25 nfts with verifiable credentials (WIP)
             </p>
           </div>
 

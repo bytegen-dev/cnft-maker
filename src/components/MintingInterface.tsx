@@ -38,10 +38,10 @@ import {
   Folder,
   RefreshCw,
   Download,
-  X,
   Grid3X3,
   List,
   Flame,
+  Power,
 } from "lucide-react";
 import {
   mintNFTs,
@@ -867,7 +867,7 @@ export default function MintingInterface() {
               Wallet Connection
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-4 -mt-4">
             {!connected ? (
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground">
@@ -951,8 +951,9 @@ export default function MintingInterface() {
                     }}
                     variant="outline"
                     size="sm"
+                    className="gap-2"
                   >
-                    Disconnect
+                    <Power className="h-4 w-4" /> Disconnect
                   </Button>
                 </div>
 
@@ -1013,7 +1014,7 @@ export default function MintingInterface() {
         </Card>
 
         {connected && (
-          <Card>
+          <Card className="pb-0">
             <CardHeader className="gap-1">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm">
@@ -1069,12 +1070,12 @@ export default function MintingInterface() {
                 </div>
               </div>
             </CardHeader>
-            {!isGalleryMinimized && (
+            {!isGalleryMinimized ? (
               <>
                 <CardContent>
                   <Separator className="mb-6" />
                   {isLoadingAssets || isLoadingMetadata ? (
-                    <div className="flex items-center justify-center py-8">
+                    <div className="flex items-center justify-center py-8 mb-6">
                       <Loader2 className="h-6 w-6 animate-spin mr-2" />
                       <span className="text-sm text-muted-foreground">
                         {isLoadingAssets
@@ -1134,7 +1135,7 @@ export default function MintingInterface() {
 
                       {/* NFT Grid/List */}
                       {nftViewMode === "grid" ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 [@media(min-width:1540px)]:grid-cols-3 gap-4 items-stretch overflow-y-auto pt-6 -mt-4 max-h-[800px]">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 [@media(min-width:1540px)]:grid-cols-3 gap-4 items-stretch overflow-y-auto pt-6 -mt-4 max-h-[800px] pb-6">
                           {getFilteredNFTs().map(
                             (asset: any, index: number) => (
                               <NFTCard
@@ -1165,7 +1166,7 @@ export default function MintingInterface() {
                           )}
                         </div>
                       ) : (
-                        <div className="space-y-2 overflow-y-auto pt-6 -mt-4 max-h-[700px]">
+                        <div className="space-y-2 overflow-y-auto pt-6 -mt-4 max-h-[700px] pb-6">
                           {getFilteredNFTs().map(
                             (asset: any, index: number) => (
                               <div
@@ -1285,6 +1286,8 @@ export default function MintingInterface() {
                   )}
                 </CardContent>
               </>
+            ) : (
+              <div></div>
             )}
           </Card>
         )}
@@ -1295,7 +1298,7 @@ export default function MintingInterface() {
         {/* Minting Card */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center justify-between gap-2 flex-wrap">
+            <CardTitle className="flex items-center justify-between gap-4 flex-wrap">
               <div className="flex items-center gap-2">
                 <Coins className="h-5 w-5" />
                 Mint NFTs
@@ -1309,7 +1312,6 @@ export default function MintingInterface() {
                       setMintMode(value);
                       if (value === "existing") {
                         loadSavedPolicies();
-                        // Set collection name from selected policy if available
                         if (selectedPolicy && savedPolicies.length > 0) {
                           const policy = savedPolicies.find(
                             (p) => p.policyId === selectedPolicy
@@ -1379,13 +1381,10 @@ export default function MintingInterface() {
               </div>
             </CardTitle>
           </CardHeader>
-          <Separator className="-mt-4 -mb-2" />
-          <CardContent className="space-y-4">
-            {/* <Separator className="mb-6" /> */}
-
+          <CardContent className="space-y-4 -mt-4">
+            <Separator />
             {connected ? (
               <>
-                {/* Existing Collection Selection */}
                 {mintMode === "existing" && (
                   <div className="space-y-2">
                     <Label htmlFor="existing-collection">
@@ -1553,7 +1552,7 @@ export default function MintingInterface() {
                 )}
 
                 {/* Recipients Section */}
-                <div className="space-y-2">
+                <div className="space-y-2 hidden">
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"

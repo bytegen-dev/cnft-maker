@@ -25,7 +25,7 @@ export const getDefaultMetadata = (
         : `${collectionName || "NFT"}_${id}_${index + 1}`;
 
     result[assetName] = {
-      ...template[key],
+      ...(template as any)[key],
       artist: "This NFT was minted by Isaac (https://bytegen.dev/)",
     };
   });
