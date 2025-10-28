@@ -979,9 +979,7 @@ export default function MintingInterface() {
                   </p>
                   <div className="flex items-center gap-2 p-2 bg-muted rounded-md">
                     <code className="text-xs flex-1 truncate">
-                      {address
-                        ? `${address.slice(0, 20)}...${address.slice(-20)}`
-                        : "Not available"}
+                      {address ? address : "Not available"}
                     </code>
                     {address && <CopyButton text={address} />}
                   </div>
