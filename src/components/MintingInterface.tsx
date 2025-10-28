@@ -42,6 +42,8 @@ import {
   List,
   Flame,
   Power,
+  Shield,
+  QrCode,
 } from "lucide-react";
 import {
   mintNFTs,
@@ -196,6 +198,10 @@ export default function MintingInterface() {
       return "grid";
     }
   });
+  const [isCredentialsMinimized, setIsCredentialsMinimized] = useState(false);
+  const [credentialSignature, setCredentialSignature] = useState<string>("");
+  const [credentialResponse, setCredentialResponse] = useState<any>(null);
+  const [isValidatingSignature, setIsValidatingSignature] = useState(false);
 
   // Fetch ADA price from CoinGecko
   const fetchAdaPrice = async () => {
@@ -364,6 +370,9 @@ export default function MintingInterface() {
           "collectionsMinimized"
         );
         const metadataMinimized = localStorage.getItem("metadataMinimized");
+        const credentialsMinimized = localStorage.getItem(
+          "credentialsMinimized"
+        );
 
         if (galleryMinimized !== null) {
           setIsGalleryMinimized(JSON.parse(galleryMinimized));
@@ -373,6 +382,9 @@ export default function MintingInterface() {
         }
         if (metadataMinimized !== null) {
           setIsMetadataMinimized(JSON.parse(metadataMinimized));
+        }
+        if (credentialsMinimized !== null) {
+          setIsCredentialsMinimized(JSON.parse(credentialsMinimized));
         }
       } catch (error) {
         console.error("Error loading minimized states:", error);
@@ -403,6 +415,13 @@ export default function MintingInterface() {
       JSON.stringify(isMetadataMinimized)
     );
   }, [isMetadataMinimized]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "credentialsMinimized",
+      JSON.stringify(isCredentialsMinimized)
+    );
+  }, [isCredentialsMinimized]);
 
   useEffect(() => {
     localStorage.setItem("nftViewMode", nftViewMode);
@@ -821,6 +840,65 @@ export default function MintingInterface() {
       alert("Failed to upload image to IPFS");
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  // Parse Veridian signature to get credential details
+  const parseVeridianSignature = async (signature: string) => {
+    setIsValidatingSignature(true);
+    try {
+      // This would be your actual API call to parse the signature
+      // For now, we'll simulate the response structure
+      const response = await fetch("/api/parseVeridianSignature", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ signature }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to parse signature");
+      }
+
+      const data = await response.json();
+      setCredentialResponse(data);
+      return data;
+    } catch (error) {
+      console.error("Failed to parse Veridian signature:", error);
+      // For demo purposes, return mock data
+      const mockResponse = {
+        assetId: "NFT_01_1234567890",
+        credentialType: "developerIdentity",
+        credentials: {
+          credentialId: "cred_" + Date.now(),
+          issuer: {
+            name: "Veridian Wallet",
+            url: "https://veridian.io",
+          },
+          signature: signature,
+          connections: [
+            {
+              name: "GitHub",
+              url: "https://github.com/user",
+              id: "github_user_123",
+              timestamp: new Date().toISOString(),
+              linked_identifier: "github_user_123",
+            },
+          ],
+        },
+        validation: {
+          isValid: true,
+          timestamp: new Date().toISOString(),
+          expiresAt: new Date(
+            Date.now() + 365 * 24 * 60 * 60 * 1000
+          ).toISOString(),
+        },
+      };
+      setCredentialResponse(mockResponse);
+      return mockResponse;
+    } finally {
+      setIsValidatingSignature(false);
     }
   };
 
@@ -1733,6 +1811,180 @@ export default function MintingInterface() {
               </>
             )}
           </CardContent>
+        </Card>
+
+        {/* Add Credentials Card */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Shield className="h-5 w-5" />
+                Add Credentials
+              </CardTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  setIsCredentialsMinimized(!isCredentialsMinimized)
+                }
+                className="h-8 w-8 p-0 rounded-full"
+              >
+                {isCredentialsMinimized ? (
+                  <Plus className="h-4 w-4" />
+                ) : (
+                  <Minus className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          </CardHeader>
+          {!isCredentialsMinimized && (
+            <CardContent className="space-y-4">
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Sign credentials for your NFTs using cardano-connector CIP-45
+                  standard
+                </p>
+
+                {/* QR Code Placeholder */}
+                <div className="flex items-center justify-center p-8 border-2 border-dashed border-muted-foreground/25 rounded-lg">
+                  <div className="text-center space-y-2">
+                    <QrCode className="h-12 w-12 text-muted-foreground mx-auto" />
+                    <p className="text-sm text-muted-foreground">
+                      QR Code will appear here
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Connect your Veridian wallet to sign credentials
+                    </p>
+                  </div>
+                </div>
+
+                {/* Credential Request Section */}
+                <div className="space-y-2">
+                  <Label htmlFor="credential-request">
+                    Credential Request (JSON)
+                  </Label>
+                  <div className="border rounded-md overflow-hidden">
+                    <Editor
+                      height="100px"
+                      defaultLanguage="json"
+                      value={JSON.stringify(
+                        {
+                          assetId: "NFT_01_1234567890",
+                          credentialType: "developerIdentity",
+                        },
+                        null,
+                        2
+                      )}
+                      options={{
+                        minimap: { enabled: false },
+                        scrollBeyondLastLine: false,
+                        fontSize: 12,
+                        lineNumbers: "on",
+                        wordWrap: "on",
+                        automaticLayout: true,
+                        readOnly: false,
+                      }}
+                      theme="vs-dark"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    This JSON payload requests the wallet to present credentials
+                    for the specified NFT asset
+                  </p>
+                </div>
+
+                {/* Sign Message Button */}
+                <Button className="w-full" disabled variant="outline">
+                  Sign Message
+                </Button>
+
+                {/* Credential Response Display */}
+                {credentialResponse && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="credential-response">
+                        Credential Response (JSON)
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <CopyButton
+                          text={JSON.stringify(credentialResponse, null, 2)}
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            parseVeridianSignature(
+                              credentialResponse.credentials?.signature || ""
+                            )
+                          }
+                          disabled={isValidatingSignature}
+                        >
+                          {isValidatingSignature ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                              Validating...
+                            </>
+                          ) : (
+                            "Re-validate"
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="border rounded-md overflow-hidden">
+                      <Editor
+                        height="250px"
+                        defaultLanguage="json"
+                        value={JSON.stringify(credentialResponse, null, 2)}
+                        options={{
+                          minimap: { enabled: false },
+                          scrollBeyondLastLine: false,
+                          fontSize: 12,
+                          lineNumbers: "on",
+                          wordWrap: "on",
+                          automaticLayout: true,
+                          readOnly: true,
+                        }}
+                        theme="vs-dark"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <CheckCircle className="h-4 w-4" />
+                      <span>
+                        Copy this JSON and replace the "credentials" value in
+                        your NFT metadata
+                      </span>
+                    </div>
+                    {credentialResponse.validation && (
+                      <div className="flex items-center gap-2 text-xs">
+                        <Badge
+                          variant={
+                            credentialResponse.validation.isValid
+                              ? "default"
+                              : "destructive"
+                          }
+                          className="text-xs"
+                        >
+                          {credentialResponse.validation.isValid
+                            ? "Valid"
+                            : "Invalid"}
+                        </Badge>
+                        <span className="text-muted-foreground">
+                          Expires:{" "}
+                          {new Date(
+                            credentialResponse.validation.expiresAt
+                          ).toLocaleDateString()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <p className="text-xs text-muted-foreground text-center">
+                  Credential signing functionality coming soon
+                </p>
+              </div>
+            </CardContent>
+          )}
         </Card>
 
         {/* Image Upload Card */}

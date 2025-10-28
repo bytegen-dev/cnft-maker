@@ -327,9 +327,53 @@ export function NFTDetailsDialog({
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled
+                    onClick={async () => {
+                      if (selectedNft?.metadata?.credentials?.signature) {
+                        try {
+                          // This would call the same parseVeridianSignature API
+                          const response = await fetch(
+                            "/api/parseVeridianSignature",
+                            {
+                              method: "POST",
+                              headers: {
+                                "Content-Type": "application/json",
+                              },
+                              body: JSON.stringify({
+                                signature:
+                                  selectedNft.metadata.credentials.signature,
+                              }),
+                            }
+                          );
+
+                          if (response.ok) {
+                            const data = await response.json();
+                            alert(
+                              `Credential Status: ${
+                                data.validation?.isValid ? "Valid" : "Invalid"
+                              }\nExpires: ${
+                                data.validation?.expiresAt
+                                  ? new Date(
+                                      data.validation.expiresAt
+                                    ).toLocaleDateString()
+                                  : "Unknown"
+                              }`
+                            );
+                          } else {
+                            alert("Failed to validate credentials");
+                          }
+                        } catch (error) {
+                          console.error("Validation error:", error);
+                          alert("Error validating credentials");
+                        }
+                      }
+                    }}
+                    disabled={!selectedNft?.metadata?.credentials?.signature}
                     className="w-full"
-                    title="Credential validation coming soon"
+                    title={
+                      selectedNft?.metadata?.credentials?.signature
+                        ? "Click to validate credentials"
+                        : "No signature found"
+                    }
                   >
                     <CheckCircle className="h-4 w-4 mr-2" />
                     Validate Credentials
