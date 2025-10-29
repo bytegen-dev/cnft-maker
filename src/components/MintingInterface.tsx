@@ -199,8 +199,9 @@ export default function MintingInterface() {
       return "grid";
     }
   });
-  const [isCredentialsMinimized, setIsCredentialsMinimized] = useState(false);
+  const [isCredentialsMinimized, setIsCredentialsMinimized] = useState(true);
   const [isMintingMinimized, setIsMintingMinimized] = useState(true);
+  const [isIPFSMinimized, setIsIPFSMinimized] = useState(true);
   const [credentialSignature, setCredentialSignature] = useState<string>("");
   const [credentialResponse, setCredentialResponse] = useState<any>(null);
   const [isValidatingSignature, setIsValidatingSignature] = useState(false);
@@ -385,6 +386,7 @@ export default function MintingInterface() {
           "credentialsMinimized"
         );
         const mintingMinimized = localStorage.getItem("mintingMinimized");
+        const ipfsMinimized = localStorage.getItem("ipfsMinimized");
 
         if (galleryMinimized !== null) {
           setIsGalleryMinimized(JSON.parse(galleryMinimized));
@@ -400,6 +402,9 @@ export default function MintingInterface() {
         }
         if (mintingMinimized !== null) {
           setIsMintingMinimized(JSON.parse(mintingMinimized));
+        }
+        if (ipfsMinimized !== null) {
+          setIsIPFSMinimized(JSON.parse(ipfsMinimized));
         }
       } catch (error) {
         console.error("Error loading minimized states:", error);
@@ -444,6 +449,10 @@ export default function MintingInterface() {
       JSON.stringify(isMintingMinimized)
     );
   }, [isMintingMinimized]);
+
+  useEffect(() => {
+    localStorage.setItem("ipfsMinimized", JSON.stringify(isIPFSMinimized));
+  }, [isIPFSMinimized]);
 
   useEffect(() => {
     localStorage.setItem("nftViewMode", nftViewMode);
@@ -2276,54 +2285,70 @@ export default function MintingInterface() {
         {/* Image Upload Card */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Image className="h-5 w-5" />
-              Upload to IPFS
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="image-upload">Upload Image</Label>
-              <Input
-                id="image-upload"
-                type="file"
-                accept="image/*"
-                onChange={handleImageUpload}
-                disabled={isUploading}
-                className="w-full"
-              />
-              <p className="text-xs text-muted-foreground">
-                Upload an image to IPFS to get the IPFS hash.
-              </p>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Image className="h-5 w-5" />
+                Upload to IPFS
+              </CardTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsIPFSMinimized(!isIPFSMinimized)}
+                className="h-8 w-8 p-0 rounded-full"
+              >
+                {isIPFSMinimized ? (
+                  <Plus className="h-4 w-4" />
+                ) : (
+                  <Minus className="h-4 w-4" />
+                )}
+              </Button>
             </div>
-
-            {isUploading && (
-              <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="text-sm text-muted-foreground">
-                  Uploading to IPFS...
-                </span>
-              </div>
-            )}
-
-            {uploadedImage && (
+          </CardHeader>
+          {!isIPFSMinimized && (
+            <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>IPFS Hash:</Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={uploadedImage}
-                    readOnly
-                    className="font-mono text-sm"
-                  />
-                  <CopyButton text={uploadedImage} />
-                </div>
+                <Label htmlFor="image-upload">Upload Image</Label>
+                <Input
+                  id="image-upload"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  disabled={isUploading}
+                  className="w-full"
+                />
                 <p className="text-xs text-muted-foreground">
-                  Copy this IPFS hash and use it in your NFT metadata JSON
-                  above.
+                  Upload an image to IPFS to get the IPFS hash.
                 </p>
               </div>
-            )}
-          </CardContent>
+
+              {isUploading && (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-sm text-muted-foreground">
+                    Uploading to IPFS...
+                  </span>
+                </div>
+              )}
+
+              {uploadedImage && (
+                <div className="space-y-2">
+                  <Label>IPFS Hash:</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={uploadedImage}
+                      readOnly
+                      className="font-mono text-sm"
+                    />
+                    <CopyButton text={uploadedImage} />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Copy this IPFS hash and use it in your NFT metadata JSON
+                    above.
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          )}
         </Card>
 
         {/* Saved Collections Card */}
