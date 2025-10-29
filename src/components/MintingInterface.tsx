@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -51,7 +51,6 @@ import {
   getSavedPoliciesForNetwork,
   mintToExistingCollection,
   burnNFT,
-  hasPolicyScript,
   hasPolicyScriptForNetwork,
 } from "@/lib/minting";
 import {
@@ -74,7 +73,6 @@ import { NFTCard } from "./NFTCard";
 import { NFTDetailsDialog } from "./NFTDetailsDialog";
 import { CopyButton } from "@/components/ui/copy-button";
 import { BurnDialog } from "./BurnDialog";
-import QRCode from "react-qr-code";
 
 export default function MintingInterface() {
   // Browser wallet hooks
@@ -2139,7 +2137,7 @@ export default function MintingInterface() {
                   </Label>
                   <div className="border rounded-md overflow-hidden">
                     <Editor
-                      height="200px"
+                      height="100px"
                       defaultLanguage="json"
                       value={JSON.stringify(credentialRequest, null, 2)}
                       onChange={(value) => {
