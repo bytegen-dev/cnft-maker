@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -74,6 +74,7 @@ import { NFTCard } from "./NFTCard";
 import { NFTDetailsDialog } from "./NFTDetailsDialog";
 import { CopyButton } from "@/components/ui/copy-button";
 import { BurnDialog } from "./BurnDialog";
+import QRCode from "react-qr-code";
 
 export default function MintingInterface() {
   // Browser wallet hooks
@@ -199,9 +200,19 @@ export default function MintingInterface() {
     }
   });
   const [isCredentialsMinimized, setIsCredentialsMinimized] = useState(false);
+  const [isMintingMinimized, setIsMintingMinimized] = useState(true);
   const [credentialSignature, setCredentialSignature] = useState<string>("");
   const [credentialResponse, setCredentialResponse] = useState<any>(null);
   const [isValidatingSignature, setIsValidatingSignature] = useState(false);
+  const [isCIP45Connected, setIsCIP45Connected] = useState(false);
+  const [cip45QRCode, setCip45QRCode] = useState<string>("");
+  const [isConnectingCIP45, setIsConnectingCIP45] = useState(false);
+  const [veridianApi, setVeridianApi] = useState<any>(null);
+  const [meerkatId, setMeerkatId] = useState<string>("");
+  const [credentialRequest, setCredentialRequest] = useState({
+    assetId: "NFT_01_1234567890",
+    credentialType: "developer-credential-schema-said",
+  });
 
   // Fetch ADA price from CoinGecko
   const fetchAdaPrice = async () => {
@@ -373,6 +384,7 @@ export default function MintingInterface() {
         const credentialsMinimized = localStorage.getItem(
           "credentialsMinimized"
         );
+        const mintingMinimized = localStorage.getItem("mintingMinimized");
 
         if (galleryMinimized !== null) {
           setIsGalleryMinimized(JSON.parse(galleryMinimized));
@@ -385,6 +397,9 @@ export default function MintingInterface() {
         }
         if (credentialsMinimized !== null) {
           setIsCredentialsMinimized(JSON.parse(credentialsMinimized));
+        }
+        if (mintingMinimized !== null) {
+          setIsMintingMinimized(JSON.parse(mintingMinimized));
         }
       } catch (error) {
         console.error("Error loading minimized states:", error);
@@ -422,6 +437,13 @@ export default function MintingInterface() {
       JSON.stringify(isCredentialsMinimized)
     );
   }, [isCredentialsMinimized]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "mintingMinimized",
+      JSON.stringify(isMintingMinimized)
+    );
+  }, [isMintingMinimized]);
 
   useEffect(() => {
     localStorage.setItem("nftViewMode", nftViewMode);
@@ -843,7 +865,160 @@ export default function MintingInterface() {
     }
   };
 
-  // Parse Veridian signature to get credential details
+  // Initialize CIP-45 connection
+  const initializeCIP45 = async () => {
+    if (typeof window === "undefined") return;
+
+    try {
+      setIsConnectingCIP45(true);
+
+      // Dynamic import to avoid SSR issues
+      const { DAppPeerConnect } = await import(
+        "@fabianbormann/cardano-peer-connect"
+      );
+
+      const dAppConnect = new DAppPeerConnect({
+        dAppInfo: {
+          name: "CNFT Maker",
+          url: window.location.origin,
+        },
+        verifyConnection: (walletInfo: any, callback: any) => {
+          console.log("Wallet connection request:", walletInfo);
+          callback(true); // Auto-accept for now
+        },
+        onApiInject: (api: any) => {
+          console.log("CIP-45 API injected:", api);
+          setVeridianApi(api);
+          setIsCIP45Connected(true);
+          setIsConnectingCIP45(false);
+        },
+        onConnect: (address: string, walletInfo: any) => {
+          console.log("CIP-45 connected", address, walletInfo);
+          setIsCIP45Connected(true);
+          setIsConnectingCIP45(false);
+          // Clear timeout on successful connection
+          if ((window as any).cip45Timeout) {
+            clearTimeout((window as any).cip45Timeout);
+            (window as any).cip45Timeout = null;
+          }
+        },
+        onDisconnect: () => {
+          console.log("CIP-45 disconnected");
+          setIsCIP45Connected(false);
+          setIsConnectingCIP45(false);
+        },
+      });
+
+      // Generate QR code for wallet connection
+      try {
+        console.log("dAppConnect", dAppConnect);
+        const meerkatIdValue = (dAppConnect as any).meerkat?.identifier;
+        console.log("Meerkat ID:", meerkatIdValue);
+
+        // Store the meerkat ID
+        if (meerkatIdValue) {
+          setMeerkatId(meerkatIdValue);
+        }
+
+        // Create a separate div for QR code
+        const qrDiv = document.createElement("div");
+        qrDiv.style.width = "200px";
+        qrDiv.style.height = "200px";
+        qrDiv.style.display = "flex";
+        qrDiv.style.alignItems = "center";
+        qrDiv.style.justifyContent = "center";
+
+        // Generate QR code into the separate div
+        await dAppConnect.generateQRCode(qrDiv);
+
+        // Find container and append the QR div
+        const container = document.getElementById("cip45-qr-container");
+        if (container) {
+          container.appendChild(qrDiv);
+          setCip45QRCode("qr-generated");
+          console.log("QR code generated successfully");
+        } else {
+          console.log("Container not found");
+          setCip45QRCode("qr-placeholder");
+        }
+
+        // Set a timeout to prevent infinite pending state
+        const timeoutId = setTimeout(() => {
+          if (isConnectingCIP45) {
+            console.log("Connection timeout - stopping pending state");
+            setIsConnectingCIP45(false);
+            alert(
+              "Connection timeout. Please try scanning the QR code again with Veridian wallet."
+            );
+          }
+        }, 30000); // 30 second timeout
+
+        // Store timeout ID for cleanup
+        (window as any).cip45Timeout = timeoutId;
+      } catch (qrError) {
+        console.log("QR error:", qrError);
+        console.log("QR generation not available, using placeholder");
+        setCip45QRCode("qr-placeholder");
+      }
+    } catch (error) {
+      console.error("Failed to initialize CIP-45:", error);
+      setIsConnectingCIP45(false);
+    }
+  };
+
+  // Sign credential request
+  const signCredentialRequest = async () => {
+    if (!veridianApi || !veridianApi.experimental?.signWithCredential) {
+      console.error("CIP-45 API not available");
+      return;
+    }
+
+    try {
+      setIsValidatingSignature(true);
+
+      const signRequest = await veridianApi.experimental.signWithCredential({
+        assetId: credentialRequest.assetId,
+        credentialType: credentialRequest.credentialType,
+        message: `Mint NFT for verified developer - ${credentialRequest.assetId}`,
+      });
+
+      console.log("Credential signature response:", signRequest);
+
+      // Process the signature response
+      const credentialData = {
+        assetId: credentialRequest.assetId,
+        credentialType: credentialRequest.credentialType,
+        credentials: {
+          credentialId: signRequest.identifier || "cred_" + Date.now(),
+          issuer: {
+            name: "Veridian Wallet",
+            url: "https://veridian.io",
+          },
+          signature: signRequest.signature,
+          credential: signRequest.credential, // ACDC credential
+          identifier: signRequest.identifier, // KERI identifier
+          connections: [], // Will be populated from credential data
+        },
+        validation: {
+          isValid: true,
+          timestamp: new Date().toISOString(),
+          expiresAt: new Date(
+            Date.now() + 365 * 24 * 60 * 60 * 1000
+          ).toISOString(),
+        },
+      };
+
+      setCredentialResponse(credentialData);
+      setCredentialSignature(signRequest.signature);
+    } catch (error) {
+      console.error("Failed to sign credential request:", error);
+      alert("Failed to sign credential request. Please try again.");
+    } finally {
+      setIsValidatingSignature(false);
+    }
+  };
+
+  // Parse Veridian signature to get credential details (for validation)
   const parseVeridianSignature = async (signature: string) => {
     setIsValidatingSignature(true);
     try {
@@ -868,8 +1043,8 @@ export default function MintingInterface() {
       console.error("Failed to parse Veridian signature:", error);
       // For demo purposes, return mock data
       const mockResponse = {
-        assetId: "NFT_01_1234567890",
-        credentialType: "developerIdentity",
+        assetId: credentialRequest.assetId,
+        credentialType: credentialRequest.credentialType,
         credentials: {
           credentialId: "cred_" + Date.now(),
           issuer: {
@@ -1309,12 +1484,26 @@ export default function MintingInterface() {
         {/* Minting Card */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center justify-between gap-4 flex-wrap">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
                 <Coins className="h-5 w-5" />
                 Mint NFTs
-              </div>
-              <div className="flex items-center justify-between w-full gap-2 flex-wrap">
+              </CardTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsMintingMinimized(!isMintingMinimized)}
+                className="h-8 w-8 p-0 rounded-full"
+              >
+                {isMintingMinimized ? (
+                  <Plus className="h-4 w-4" />
+                ) : (
+                  <Minus className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+            {!isMintingMinimized && (
+              <div className="flex items-center justify-between w-full gap-2 flex-wrap mt-4">
                 <div className="flex items-center gap-2">
                   <Label htmlFor="mint-mode">Mint Mode:</Label>
                   <Select
@@ -1389,428 +1578,437 @@ export default function MintingInterface() {
                   </div>
                 )}
               </div>
-            </CardTitle>
+            )}
           </CardHeader>
-          <CardContent className="space-y-4 -mt-4">
-            <Separator />
-            {connected ? (
-              <>
-                {mintMode === "existing" && (
-                  <div className="space-y-2">
-                    <Label htmlFor="existing-collection">
-                      Select Collection
-                    </Label>
-                    <div className="flex gap-2">
-                      <Select
-                        value={selectedPolicy}
-                        onValueChange={(value) => {
-                          setSelectedPolicy(value);
-                          // Update collection name when policy changes
-                          if (value) {
-                            const policy = savedPolicies.find(
-                              (p) => p.policyId === value
-                            );
-                            if (policy) {
-                              setCollectionName(policy.collectionName);
-                              // Update metadata with the selected collection name
-                              updateMetadataWithCollectionName(
-                                policy.collectionName
+          {!isMintingMinimized && (
+            <CardContent className="space-y-4 -mt-4">
+              <Separator />
+              {connected ? (
+                <>
+                  {mintMode === "existing" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="existing-collection">
+                        Select Collection
+                      </Label>
+                      <div className="flex gap-2">
+                        <Select
+                          value={selectedPolicy}
+                          onValueChange={(value) => {
+                            setSelectedPolicy(value);
+                            // Update collection name when policy changes
+                            if (value) {
+                              const policy = savedPolicies.find(
+                                (p) => p.policyId === value
                               );
+                              if (policy) {
+                                setCollectionName(policy.collectionName);
+                                // Update metadata with the selected collection name
+                                updateMetadataWithCollectionName(
+                                  policy.collectionName
+                                );
+                              }
                             }
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="flex-1">
-                          <SelectValue placeholder="Choose a policy script..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {savedPolicies.map((policy: any, index: number) => (
-                            <SelectItem key={index} value={policy.policyId}>
-                              {policy.collectionName} (
-                              {policy.policyId.slice(0, 8)}
-                              ...)
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button
-                        onClick={loadSavedPolicies}
-                        variant="outline"
-                        size="sm"
-                      >
-                        Refresh
-                      </Button>
-                    </div>
-                    {savedPolicies.length === 0 && (
-                      <p className="text-sm text-muted-foreground">
-                        No saved policy scripts found.{" "}
-                        <span
-                          className="text-primary cursor-pointer underline"
-                          onClick={() => setUploadDialogOpen(true)}
+                          }}
                         >
-                          Upload
-                        </span>{" "}
-                        a policy script first.
+                          <SelectTrigger className="flex-1">
+                            <SelectValue placeholder="Choose a policy script..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {savedPolicies.map((policy: any, index: number) => (
+                              <SelectItem key={index} value={policy.policyId}>
+                                {policy.collectionName} (
+                                {policy.policyId.slice(0, 8)}
+                                ...)
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          onClick={loadSavedPolicies}
+                          variant="outline"
+                          size="sm"
+                        >
+                          Refresh
+                        </Button>
+                      </div>
+                      {savedPolicies.length === 0 && (
+                        <p className="text-sm text-muted-foreground">
+                          No saved policy scripts found.{" "}
+                          <span
+                            className="text-primary cursor-pointer underline"
+                            onClick={() => setUploadDialogOpen(true)}
+                          >
+                            Upload
+                          </span>{" "}
+                          a policy script first.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label htmlFor="collection-name">
+                      Collection Name{" "}
+                      {mintMode === "new" ? (
+                        <span className="text-red-500">*</span>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          not required
+                        </span>
+                      )}
+                    </Label>
+                    <Input
+                      id="collection-name"
+                      value={collectionName}
+                      onChange={(e) => {
+                        setCollectionName(e.target.value);
+                        // Update metadata with new collection name
+                        if (mintMode === "new") {
+                          updateMetadataWithCollectionName(e.target.value);
+                        }
+                      }}
+                      placeholder="Enter collection name..."
+                      className="w-full"
+                      disabled={mintMode === "existing"}
+                    />
+                    {mintMode === "existing" ? (
+                      <p className="text-xs text-muted-foreground">
+                        Collection name is determined by the selected existing
+                        collection
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Collection name is required to create a new collection
                       </p>
                     )}
                   </div>
-                )}
 
-                <div className="space-y-2">
-                  <Label htmlFor="collection-name">
-                    Collection Name{" "}
-                    {mintMode === "new" ? (
-                      <span className="text-red-500">*</span>
-                    ) : (
-                      <span className="text-muted-foreground">
-                        not required
-                      </span>
-                    )}
-                  </Label>
-                  <Input
-                    id="collection-name"
-                    value={collectionName}
-                    onChange={(e) => {
-                      setCollectionName(e.target.value);
-                      // Update metadata with new collection name
-                      if (mintMode === "new") {
-                        updateMetadataWithCollectionName(e.target.value);
-                      }
-                    }}
-                    placeholder="Enter collection name..."
-                    className="w-full"
-                    disabled={mintMode === "existing"}
-                  />
-                  {mintMode === "existing" ? (
-                    <p className="text-xs text-muted-foreground">
-                      Collection name is determined by the selected existing
-                      collection
-                    </p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      Collection name is required to create a new collection
-                    </p>
+                  {/* Time Lock Option - only for new collections */}
+                  {mintMode === "new" && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="use-time-lock"
+                          checked={useTimeLock}
+                          onChange={(e) => setUseTimeLock(e.target.checked)}
+                          className="rounded"
+                        />
+                        <Label htmlFor="use-time-lock">Use Time Lock</Label>
+                      </div>
+                      {!useTimeLock && (
+                        <div className="p-2 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded text-xs">
+                          <p className="text-yellow-800 dark:text-yellow-200 font-medium">
+                            ⚠️ Policy ID Warning
+                          </p>
+                          <p className="text-yellow-700 dark:text-yellow-300 mt-1">
+                            Without time lock, this collection will share the
+                            same policy ID as other non-time-locked collections
+                            from your wallet.
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   )}
-                </div>
 
-                {/* Time Lock Option - only for new collections */}
-                {mintMode === "new" && (
-                  <div className="space-y-2">
+                  {/* Time Lock Settings - only for new collections */}
+                  {mintMode === "new" && useTimeLock && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Time Lock Settings</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="time-lock-epochs">
+                            Duration (Epochs)
+                          </Label>
+                          <div className="flex items-center gap-2">
+                            <Slider
+                              id="time-lock-epochs"
+                              min={1}
+                              max={1000}
+                              value={[timeLockEpochs]}
+                              onValueChange={(value) =>
+                                setTimeLockEpochs(value[0])
+                              }
+                              className="flex-1"
+                            />
+                            <span className="text-sm font-mono w-12 text-right">
+                              {timeLockEpochs}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-xs text-muted-foreground">
+                            <span>1 epoch (~5 days)</span>
+                            <span>1000 epochs (~13.7 years)</span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Time-locked collections expire after {timeLockEpochs}{" "}
+                          epochs (~{Math.round(timeLockEpochs * 5)} days). You
+                          won't be able to add more NFTs after expiration.
+                        </p>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Recipients Section */}
+                  <div className="space-y-2 hidden">
                     <div className="flex items-center gap-2">
                       <input
                         type="checkbox"
-                        id="use-time-lock"
-                        checked={useTimeLock}
-                        onChange={(e) => setUseTimeLock(e.target.checked)}
+                        id="use-custom-recipients"
+                        checked={useCustomRecipients}
+                        onChange={(e) => {
+                          setUseCustomRecipients(e.target.checked);
+                          // Initialize recipients array when enabling custom recipients
+                          if (
+                            e.target.checked &&
+                            customRecipients.length === 0
+                          ) {
+                            setCustomRecipients(["", "", ""]);
+                          }
+                        }}
                         className="rounded"
                       />
-                      <Label htmlFor="use-time-lock">Use Time Lock</Label>
+                      <Label htmlFor="use-custom-recipients">
+                        Use custom recipient addresses
+                      </Label>
                     </div>
-                    {!useTimeLock && (
-                      <div className="p-2 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded text-xs">
-                        <p className="text-yellow-800 dark:text-yellow-200 font-medium">
-                          ⚠️ Policy ID Warning
-                        </p>
-                        <p className="text-yellow-700 dark:text-yellow-300 mt-1">
-                          Without time lock, this collection will share the same
-                          policy ID as other non-time-locked collections from
-                          your wallet.
+
+                    {useCustomRecipients && (
+                      <div className="space-y-2">
+                        <Label>Recipient Addresses</Label>
+                        <div className="space-y-2">
+                          {customRecipients.map((address, index) => (
+                            <Input
+                              key={index}
+                              value={address}
+                              onChange={(e) => {
+                                const newRecipients = [...customRecipients];
+                                newRecipients[index] = e.target.value;
+                                setCustomRecipients(newRecipients);
+                              }}
+                              placeholder={`Recipient ${
+                                index + 1
+                              } address (optional)`}
+                              className="w-full font-mono text-sm"
+                            />
+                          ))}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Enter recipient addresses for your NFTs. Leave empty
+                          to use your wallet address for that NFT.
                         </p>
                       </div>
                     )}
-                  </div>
-                )}
 
-                {/* Time Lock Settings - only for new collections */}
-                {mintMode === "new" && useTimeLock && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Time Lock Settings</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="time-lock-epochs">
-                          Duration (Epochs)
-                        </Label>
-                        <div className="flex items-center gap-2">
-                          <Slider
-                            id="time-lock-epochs"
-                            min={1}
-                            max={1000}
-                            value={[timeLockEpochs]}
-                            onValueChange={(value) =>
-                              setTimeLockEpochs(value[0])
-                            }
-                            className="flex-1"
-                          />
-                          <span className="text-sm font-mono w-12 text-right">
-                            {timeLockEpochs}
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-xs text-muted-foreground">
-                          <span>1 epoch (~5 days)</span>
-                          <span>1000 epochs (~13.7 years)</span>
-                        </div>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Time-locked collections expire after {timeLockEpochs}{" "}
-                        epochs (~{Math.round(timeLockEpochs * 5)} days). You
-                        won't be able to add more NFTs after expiration.
+                    {!useCustomRecipients && (
+                      <p className="text-sm text-muted-foreground">
+                        All NFTs will be sent to your wallet address.
                       </p>
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Recipients Section */}
-                <div className="space-y-2 hidden">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="use-custom-recipients"
-                      checked={useCustomRecipients}
-                      onChange={(e) => {
-                        setUseCustomRecipients(e.target.checked);
-                        // Initialize recipients array when enabling custom recipients
-                        if (e.target.checked && customRecipients.length === 0) {
-                          setCustomRecipients(["", "", ""]);
-                        }
-                      }}
-                      className="rounded"
-                    />
-                    <Label htmlFor="use-custom-recipients">
-                      Use custom recipient addresses
-                    </Label>
+                    )}
                   </div>
 
-                  {useCustomRecipients && (
-                    <div className="space-y-2">
-                      <Label>Recipient Addresses</Label>
-                      <div className="space-y-2">
-                        {customRecipients.map((address, index) => (
-                          <Input
-                            key={index}
-                            value={address}
-                            onChange={(e) => {
-                              const newRecipients = [...customRecipients];
-                              newRecipients[index] = e.target.value;
-                              setCustomRecipients(newRecipients);
-                            }}
-                            placeholder={`Recipient ${
-                              index + 1
-                            } address (optional)`}
-                            className="w-full font-mono text-sm"
-                          />
-                        ))}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Enter recipient addresses for your NFTs. Leave empty to
-                        use your wallet address for that NFT.
-                      </p>
-                    </div>
-                  )}
+                  <Separator />
 
-                  {!useCustomRecipients && (
-                    <p className="text-sm text-muted-foreground">
-                      All NFTs will be sent to your wallet address.
-                    </p>
-                  )}
-                </div>
+                  {/* NFT Metadata Editor */}
 
-                <Separator />
-
-                {/* NFT Metadata Editor */}
-
-                <p className="text-muted-foreground">
-                  {mintMode === "new"
-                    ? `Create a new collection with NFTs based on your metadata JSON using the ${
-                        metadataStandard === METADATA_STANDARDS.BASIC
-                          ? "Basic"
-                          : "Developer Identity"
-                      } standard.`
-                    : "Add NFTs to the selected existing collection based on your metadata JSON."}
-                </p>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <div className="flex items-center">
-                      <Label htmlFor="metadata-editor">
-                        NFT Metadata (JSON)
-                      </Label>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        onClick={() =>
-                          updateMetadataWithCollectionName(collectionName)
-                        }
-                        variant="outline"
-                        size="sm"
-                      >
-                        Reset to Default
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          setIsMetadataMinimized(!isMetadataMinimized)
-                        }
-                        className="h-8 w-8 p-0 rounded-full"
-                      >
-                        {isMetadataMinimized ? (
-                          <Plus className="h-4 w-4" />
-                        ) : (
-                          <Minus className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                  {!isMetadataMinimized && (
-                    <>
-                      <div className="border rounded-md overflow-hidden">
-                        <Editor
-                          height="300px"
-                          defaultLanguage="json"
-                          value={nftMetadata}
-                          onChange={(value) => {
-                            setNftMetadata(value || "");
-                            // Update custom recipients array size based on metadata
-                            try {
-                              const parsedMetadata = JSON.parse(value || "{}");
-                              const assetCount =
-                                Object.keys(parsedMetadata).length;
-                              if (assetCount > 0) {
-                                setCustomRecipients((prev) => {
-                                  const newArray = new Array(assetCount).fill(
-                                    ""
-                                  );
-                                  // Preserve existing values
-                                  return newArray.map(
-                                    (_, index) => prev[index] || ""
-                                  );
-                                });
-                              }
-                            } catch (error) {
-                              // If metadata is invalid, keep current recipients
-                            }
-                          }}
-                          options={{
-                            minimap: { enabled: false },
-                            scrollBeyondLastLine: false,
-                            fontSize: 14,
-                            lineNumbers: "on",
-                            wordWrap: "on",
-                            automaticLayout: true,
-                          }}
-                          theme="vs-dark"
-                        />
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Edit the JSON metadata for your NFTs. Make sure the JSON
-                        is valid before minting. Click "Reset to Default" to
-                        update with current collection name.
-                      </p>
-                    </>
-                  )}
-                </div>
-
-                <Button
-                  onClick={handleMint}
-                  disabled={
-                    isMinting ||
-                    !connected ||
-                    (mintMode === "new" && !collectionName.trim()) ||
-                    (mintMode === "existing" && !selectedPolicy)
-                  }
-                  className="w-full"
-                  size="lg"
-                >
-                  {isMinting ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      {mintMode === "new"
-                        ? "Creating Collection..."
-                        : "Adding to Collection..."}
-                    </>
-                  ) : mintMode === "new" ? (
-                    "Create Collection"
-                  ) : (
-                    "Add to Collection"
-                  )}
-                </Button>
-
-                {/* Result Alert */}
-                {mintResult && (
-                  <Alert
-                    className={
-                      mintResult.success ? "border-green-500" : "border-red-500"
-                    }
-                  >
-                    <AlertDescription>
-                      <div className="space-y-2">
-                        <p>{mintResult.message}</p>
-                        {mintResult.txHash && (
-                          <div className="text-sm flex items-center gap-2">
-                            <strong className="w-fit">TxHash:</strong>
-                            <div className="flex items-center gap-2 flex-1">
-                              <a
-                                href={`https://${
-                                  network === 0 ? "preprod." : ""
-                                }cardanoscan.io/transaction/${
-                                  mintResult.txHash
-                                }`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="bg-muted px-2 py-1 rounded text-xs hover:bg-muted/80 transition-colors inline-block flex-1"
-                                title={mintResult.txHash}
-                              >
-                                {mintResult.txHash.slice(0, 8)}...
-                                {mintResult.txHash.slice(-8)}
-                              </a>
-                              <CopyButton text={mintResult.txHash} />
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Policy Script Download Section */}
-                        {mintResult.success && policyScript && (
-                          <div className="mt-4 p-3 bg-muted border rounded-md">
-                            <div className="space-y-2">
-                              <p className="text-sm font-medium text-foreground">
-                                🔑 Policy Script Generated
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                Download your policy script to burn NFTs from
-                                this collection later. Keep this file safe -
-                                you'll need it to burn NFTs!
-                              </p>
-                              <Button
-                                onClick={downloadPolicyScript}
-                                size="sm"
-                                variant="outline"
-                                className="text-foreground border-border hover:bg-muted"
-                              >
-                                Download Policy Script
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </AlertDescription>
-                  </Alert>
-                )}
-              </>
-            ) : (
-              <>
-                <div className="text-center py-8">
                   <p className="text-muted-foreground">
-                    Connect your wallet to proceed
+                    {mintMode === "new"
+                      ? `Create a new collection with NFTs based on your metadata JSON using the ${
+                          metadataStandard === METADATA_STANDARDS.BASIC
+                            ? "Basic"
+                            : "Developer Identity"
+                        } standard.`
+                      : "Add NFTs to the selected existing collection based on your metadata JSON."}
                   </p>
-                  <p className="text-sm text-muted-foreground">
-                    Please connect a browser wallet to mint NFTs
-                  </p>
-                </div>
-              </>
-            )}
-          </CardContent>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center">
+                        <Label htmlFor="metadata-editor">
+                          NFT Metadata (JSON)
+                        </Label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          onClick={() =>
+                            updateMetadataWithCollectionName(collectionName)
+                          }
+                          variant="outline"
+                          size="sm"
+                        >
+                          Reset to Default
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            setIsMetadataMinimized(!isMetadataMinimized)
+                          }
+                          className="h-8 w-8 p-0 rounded-full"
+                        >
+                          {isMetadataMinimized ? (
+                            <Plus className="h-4 w-4" />
+                          ) : (
+                            <Minus className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                    {!isMetadataMinimized && (
+                      <>
+                        <div className="border rounded-md overflow-hidden">
+                          <Editor
+                            height="300px"
+                            defaultLanguage="json"
+                            value={nftMetadata}
+                            onChange={(value) => {
+                              setNftMetadata(value || "");
+                              // Update custom recipients array size based on metadata
+                              try {
+                                const parsedMetadata = JSON.parse(
+                                  value || "{}"
+                                );
+                                const assetCount =
+                                  Object.keys(parsedMetadata).length;
+                                if (assetCount > 0) {
+                                  setCustomRecipients((prev) => {
+                                    const newArray = new Array(assetCount).fill(
+                                      ""
+                                    );
+                                    // Preserve existing values
+                                    return newArray.map(
+                                      (_, index) => prev[index] || ""
+                                    );
+                                  });
+                                }
+                              } catch (error) {
+                                // If metadata is invalid, keep current recipients
+                              }
+                            }}
+                            options={{
+                              minimap: { enabled: false },
+                              scrollBeyondLastLine: false,
+                              fontSize: 14,
+                              lineNumbers: "on",
+                              wordWrap: "on",
+                              automaticLayout: true,
+                            }}
+                            theme="vs-dark"
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Edit the JSON metadata for your NFTs. Make sure the
+                          JSON is valid before minting. Click "Reset to Default"
+                          to update with current collection name.
+                        </p>
+                      </>
+                    )}
+                  </div>
+
+                  <Button
+                    onClick={handleMint}
+                    disabled={
+                      isMinting ||
+                      !connected ||
+                      (mintMode === "new" && !collectionName.trim()) ||
+                      (mintMode === "existing" && !selectedPolicy)
+                    }
+                    className="w-full"
+                    size="lg"
+                  >
+                    {isMinting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        {mintMode === "new"
+                          ? "Creating Collection..."
+                          : "Adding to Collection..."}
+                      </>
+                    ) : mintMode === "new" ? (
+                      "Create Collection"
+                    ) : (
+                      "Add to Collection"
+                    )}
+                  </Button>
+
+                  {/* Result Alert */}
+                  {mintResult && (
+                    <Alert
+                      className={
+                        mintResult.success
+                          ? "border-green-500"
+                          : "border-red-500"
+                      }
+                    >
+                      <AlertDescription>
+                        <div className="space-y-2">
+                          <p>{mintResult.message}</p>
+                          {mintResult.txHash && (
+                            <div className="text-sm flex items-center gap-2">
+                              <strong className="w-fit">TxHash:</strong>
+                              <div className="flex items-center gap-2 flex-1">
+                                <a
+                                  href={`https://${
+                                    network === 0 ? "preprod." : ""
+                                  }cardanoscan.io/transaction/${
+                                    mintResult.txHash
+                                  }`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="bg-muted px-2 py-1 rounded text-xs hover:bg-muted/80 transition-colors inline-block flex-1"
+                                  title={mintResult.txHash}
+                                >
+                                  {mintResult.txHash.slice(0, 8)}...
+                                  {mintResult.txHash.slice(-8)}
+                                </a>
+                                <CopyButton text={mintResult.txHash} />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Policy Script Download Section */}
+                          {mintResult.success && policyScript && (
+                            <div className="mt-4 p-3 bg-muted border rounded-md">
+                              <div className="space-y-2">
+                                <p className="text-sm font-medium text-foreground">
+                                  🔑 Policy Script Generated
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  Download your policy script to burn NFTs from
+                                  this collection later. Keep this file safe -
+                                  you'll need it to burn NFTs!
+                                </p>
+                                <Button
+                                  onClick={downloadPolicyScript}
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-foreground border-border hover:bg-muted"
+                                >
+                                  Download Policy Script
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground">
+                      Connect your wallet to proceed
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Please connect a browser wallet to mint NFTs
+                    </p>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          )}
         </Card>
 
         {/* Add Credentials Card */}
@@ -1845,18 +2043,85 @@ export default function MintingInterface() {
                   standard
                 </p>
 
-                {/* QR Code Placeholder */}
+                {/* QR Code for CIP-45 Connection */}
                 <div className="flex items-center justify-center p-8 border-2 border-dashed border-muted-foreground/25 rounded-lg">
-                  <div className="text-center space-y-2">
-                    <QrCode className="h-12 w-12 text-muted-foreground mx-auto" />
-                    <p className="text-sm text-muted-foreground">
-                      QR Code will appear here
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Connect your Veridian wallet to sign credentials
-                    </p>
+                  <div className="text-center space-y-4">
+                    <div className="p-4 rounded-lg flex items-center justify-center relative">
+                      {/* QR Code Container - Always visible */}
+                      <div
+                        id="cip45-qr-container"
+                        className="flex w-full items-center justify-center"
+                      >
+                        {/* Fallback QR Icon - Shows when no QR code is generated */}
+                        {cip45QRCode !== "qr-generated" && (
+                          <QrCode className="h-24 w-24 text-muted-foreground/50" />
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium">
+                        {cip45QRCode === "qr-generated"
+                          ? "Scan with Veridian Wallet"
+                          : "Click 'Connect Wallet' to generate QR code"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Use CIP-45 to connect and enable credential signing
+                      </p>
+
+                      {/* Meerkat ID Display */}
+                      {meerkatId && (
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Peer ID
+                          </p>
+                          <div className="flex items-center gap-2 p-2 bg-muted rounded-md">
+                            <code className="text-xs flex-1 truncate font-mono">
+                              {meerkatId}
+                            </code>
+                            <CopyButton text={meerkatId} />
+                          </div>
+                        </div>
+                      )}
+
+                      {isConnectingCIP45 && (
+                        <div className="flex items-center justify-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span className="text-xs text-muted-foreground">
+                            Connecting...
+                          </span>
+                        </div>
+                      )}
+                      {isCIP45Connected && (
+                        <Badge variant="default" className="text-green-600">
+                          Connected
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 </div>
+
+                {/* Connection Button */}
+                {!isCIP45Connected && (
+                  <Button
+                    onClick={initializeCIP45}
+                    disabled={isConnectingCIP45}
+                    variant="outline"
+                    className="w-full"
+                  >
+                    {isConnectingCIP45 ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Connecting...
+                      </>
+                    ) : (
+                      <>
+                        <QrCode className="h-4 w-4 mr-2" />
+                        Connect Wallet
+                      </>
+                    )}
+                  </Button>
+                )}
 
                 {/* Credential Request Section */}
                 <div className="space-y-2">
@@ -1865,16 +2130,17 @@ export default function MintingInterface() {
                   </Label>
                   <div className="border rounded-md overflow-hidden">
                     <Editor
-                      height="100px"
+                      height="200px"
                       defaultLanguage="json"
-                      value={JSON.stringify(
-                        {
-                          assetId: "NFT_01_1234567890",
-                          credentialType: "developerIdentity",
-                        },
-                        null,
-                        2
-                      )}
+                      value={JSON.stringify(credentialRequest, null, 2)}
+                      onChange={(value) => {
+                        try {
+                          const parsed = JSON.parse(value || "{}");
+                          setCredentialRequest(parsed);
+                        } catch (error) {
+                          // Invalid JSON, keep current value
+                        }
+                      }}
                       options={{
                         minimap: { enabled: false },
                         scrollBeyondLastLine: false,
@@ -1894,8 +2160,28 @@ export default function MintingInterface() {
                 </div>
 
                 {/* Sign Message Button */}
-                <Button className="w-full" disabled variant="outline">
-                  Sign Message
+                <Button
+                  className="w-full"
+                  onClick={signCredentialRequest}
+                  disabled={!isCIP45Connected || isValidatingSignature}
+                  variant={isCIP45Connected ? "default" : "outline"}
+                >
+                  {isValidatingSignature ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      Signing...
+                    </>
+                  ) : isCIP45Connected ? (
+                    <>
+                      <Shield className="h-4 w-4 mr-2" />
+                      Sign Message
+                    </>
+                  ) : (
+                    <>
+                      <Shield className="h-4 w-4 mr-2" />
+                      Connect Wallet First
+                    </>
+                  )}
                 </Button>
 
                 {/* Credential Response Display */}
