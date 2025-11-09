@@ -146,3 +146,10 @@
 * {
   font-family: "Bitcount Grid Single", system-ui, sans-serif;
 }
+
+#cip45-qr-container {
+  div {
+    width: 100% !important;
+    height: 100% !important;
+  }
+}
