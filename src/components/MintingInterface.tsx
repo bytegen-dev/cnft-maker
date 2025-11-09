@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -98,7 +98,7 @@ export default function MintingInterface() {
     txHash?: string;
     message: string;
   } | null>(null);
-  const [collectionName, setCollectionName] = useState("");
+  const [collectionName, setCollectionName] = useState("TEST");
   const [metadataStandard, setMetadataStandard] = useState<MetadataStandard>(
     () => {
       try {
@@ -203,15 +203,27 @@ export default function MintingInterface() {
   const [credentialSignature, setCredentialSignature] = useState<string>("");
   const [credentialResponse, setCredentialResponse] = useState<any>(null);
   const [isValidatingSignature, setIsValidatingSignature] = useState(false);
+  const [credentialError, setCredentialError] = useState<string>("");
+  const [isPollingCredentials, setIsPollingCredentials] = useState(false);
   const [isCIP45Connected, setIsCIP45Connected] = useState(false);
+  const [walletOwnershipVerified, setWalletOwnershipVerified] = useState(false);
+  const [ownershipSignature, setOwnershipSignature] = useState<string>("");
+  const [isSigningOwnership, setIsSigningOwnership] = useState(false);
   const [cip45QRCode, setCip45QRCode] = useState<string>("");
   const [isConnectingCIP45, setIsConnectingCIP45] = useState(false);
   const [veridianApi, setVeridianApi] = useState<any>(null);
   const [meerkatId, setMeerkatId] = useState<string>("");
+  const [walletIdentifier, setWalletIdentifier] = useState<string>(""); // KERI identifier (aid)
+  const [dAppConnect, setDAppConnect] = useState<any>(null); // Store DAppPeerConnect instance
+  const [walletName, setWalletName] = useState<string>("idw_p2p"); // Wallet name for CIP-45 API access
   const [credentialRequest, setCredentialRequest] = useState({
-    assetId: "NFT_01_1234567890",
-    credentialType: "developer-credential-schema-said",
+    schemaSaid: "EJxnJdxkHbRw2wVFNe4IUOPLt8fEtg9Sr3WyTjlgKoIb", // Credential ID or Schema SAID
   });
+  const [availableCredentials, setAvailableCredentials] = useState<any[]>([]);
+  const [selectedCredentialIndex, setSelectedCredentialIndex] = useState<
+    number | null
+  >(null);
+  const [isSigningCredentialMint, setIsSigningCredentialMint] = useState(false);
 
   // Fetch ADA price from CoinGecko
   const fetchAdaPrice = async () => {
@@ -530,6 +542,55 @@ export default function MintingInterface() {
         return;
       }
 
+      // Check if credentials with issueeId are present - require CIP-45 confirmation
+      let hasCredentialsWithIssueeId = false;
+      let credentialIssueeId = "";
+      let credentialTitle = "";
+
+      // Check all NFT assets in metadata for credentials
+      Object.keys(parsedMetadata).forEach((assetName) => {
+        const asset = parsedMetadata[assetName];
+        if (
+          asset?.credentials?.issueeId &&
+          asset.credentials.issueeId.trim() !== ""
+        ) {
+          hasCredentialsWithIssueeId = true;
+          credentialIssueeId = asset.credentials.issueeId;
+          credentialTitle = asset.credentials.credentialTitle || "";
+        }
+      });
+
+      // If credentials with issueeId are present, require CIP-45 confirmation
+      if (hasCredentialsWithIssueeId) {
+        if (!isCIP45Connected || !walletIdentifier) {
+          setMintResult({
+            success: false,
+            message:
+              "CIP-45 connection required. Please connect your Veridian wallet to mint NFTs with credentials.",
+          });
+          setIsMinting(false);
+          return;
+        }
+
+        // Notify user that signature is required
+        setIsSigningCredentialMint(true);
+
+        // Verify credential usage with CIP-45 signature
+        try {
+          await verifyCredentialForMinting(credentialIssueeId, credentialTitle);
+        } catch (error: any) {
+          setIsSigningCredentialMint(false);
+          setMintResult({
+            success: false,
+            message: error.message || "Failed to verify credential usage.",
+          });
+          setIsMinting(false);
+          return;
+        } finally {
+          setIsSigningCredentialMint(false);
+        }
+      }
+
       let result;
       const recipientsToUse = useCustomRecipients
         ? customRecipients
@@ -574,19 +635,6 @@ export default function MintingInterface() {
       // Refresh saved policies after successful mint
       if (result.success) {
         setSavedPolicies(getSavedPolicies());
-
-        // If it's a new collection, switch to "Add to Existing" mode and select the new policy
-        if (
-          mintMode === "new" &&
-          result.policyId &&
-          (result as any).policyScript
-        ) {
-          setMintMode("existing");
-          setSelectedPolicy(result.policyId);
-          setCollectionName(
-            (result as any).policyScript.collectionName || "Default Collection"
-          );
-        }
       }
     } catch (error) {
       setMintResult({
@@ -884,7 +932,7 @@ export default function MintingInterface() {
         "@fabianbormann/cardano-peer-connect"
       );
 
-      const dAppConnect = new DAppPeerConnect({
+      const dAppConnectInstance = new DAppPeerConnect({
         dAppInfo: {
           name: "CNFT Maker",
           url: window.location.origin,
@@ -893,16 +941,100 @@ export default function MintingInterface() {
           console.log("Wallet connection request:", walletInfo);
           callback(true); // Auto-accept for now
         },
-        onApiInject: (api: any) => {
-          console.log("CIP-45 API injected:", api);
-          setVeridianApi(api);
-          setIsCIP45Connected(true);
-          setIsConnectingCIP45(false);
+        onApiInject: async (injectedWalletName: string) => {
+          console.log("CIP-45 API injected:", injectedWalletName);
+          setWalletName(injectedWalletName); // Store wallet name for later use
+
+          // Poll for API availability (following CIP-45 demo pattern)
+          const start = Date.now();
+          const interval = 100; // Check every 100ms
+          const timeout = 5000; // 5 second timeout
+
+          const checkApi = setInterval(async () => {
+            // @ts-ignore
+            const api = window.cardano && window.cardano[injectedWalletName];
+
+            if (api || Date.now() - start > timeout) {
+              clearInterval(checkApi);
+
+              if (api) {
+                setVeridianApi(api);
+                setIsCIP45Connected(true);
+                setIsConnectingCIP45(false);
+
+                // Get KERI identifier using experimental API (following CIP-45 demo pattern)
+                try {
+                  const enabledApi = await api.enable();
+                  // @ts-ignore - experimental API may not be in type definitions
+                  if (enabledApi?.experimental?.getKeriIdentifier) {
+                    // @ts-ignore
+                    const keriIdentifier =
+                      // @ts-ignore
+                      await enabledApi.experimental.getKeriIdentifier();
+                    if (keriIdentifier?.id) {
+                      setWalletIdentifier(keriIdentifier.id);
+                      console.log(
+                        "Wallet identifier (AID) from getKeriIdentifier:",
+                        keriIdentifier.id
+                      );
+                      console.log("OOBI:", keriIdentifier.oobi);
+                    }
+                  }
+                } catch (error) {
+                  console.error("Failed to get KERI identifier:", error);
+                }
+              } else {
+                console.error(
+                  `Timeout: API not found for wallet: ${injectedWalletName}`
+                );
+                setIsCIP45Connected(false);
+                setIsConnectingCIP45(false);
+              }
+            }
+          }, interval);
         },
-        onConnect: (address: string, walletInfo: any) => {
+        onConnect: async (address: string, walletInfo: any) => {
           console.log("CIP-45 connected", address, walletInfo);
           setIsCIP45Connected(true);
           setIsConnectingCIP45(false);
+
+          // Try to get KERI identifier from the injected API
+          try {
+            // Check if API is available in window.cardano
+            const connectedWalletName = walletInfo?.name || "idw_p2p";
+            setWalletName(connectedWalletName); // Store wallet name for later use
+            // @ts-ignore
+            const api = window.cardano && window.cardano[connectedWalletName];
+            if (api && typeof api.enable === "function") {
+              const enabledApi = await api.enable();
+              // @ts-ignore - experimental API may not be in type definitions
+              if (enabledApi?.experimental?.getKeriIdentifier) {
+                // @ts-ignore
+                const keriIdentifier =
+                  // @ts-ignore
+                  await enabledApi.experimental.getKeriIdentifier();
+                if (keriIdentifier?.id) {
+                  setWalletIdentifier(keriIdentifier.id);
+                  console.log(
+                    "Wallet identifier (AID) from getKeriIdentifier:",
+                    keriIdentifier.id
+                  );
+                  console.log("OOBI:", keriIdentifier.oobi);
+                }
+              }
+            }
+          } catch (error) {
+            console.error("Failed to get KERI identifier in onConnect:", error);
+            // Fallback: try to get identifier from walletInfo
+            if (walletInfo?.identifier || walletInfo?.aid) {
+              setWalletIdentifier(walletInfo.identifier || walletInfo.aid);
+              console.log(
+                "Wallet identifier from walletInfo (fallback):",
+                walletInfo.identifier || walletInfo.aid
+              );
+            }
+          }
+
           // Clear timeout on successful connection
           if ((window as any).cip45Timeout) {
             clearTimeout((window as any).cip45Timeout);
@@ -913,13 +1045,18 @@ export default function MintingInterface() {
           console.log("CIP-45 disconnected");
           setIsCIP45Connected(false);
           setIsConnectingCIP45(false);
+          setWalletIdentifier(""); // Clear wallet identifier on disconnect
+          setVeridianApi(null); // Clear API reference
         },
       });
 
+      // Store the dAppConnect instance
+      setDAppConnect(dAppConnectInstance);
+
       // Generate QR code for wallet connection
       try {
-        console.log("dAppConnect", dAppConnect);
-        const meerkatIdValue = (dAppConnect as any).meerkat?.identifier;
+        console.log("dAppConnect", dAppConnectInstance);
+        const meerkatIdValue = (dAppConnectInstance as any).meerkat?.identifier;
         console.log("Meerkat ID:", meerkatIdValue);
 
         // Store the meerkat ID
@@ -936,7 +1073,7 @@ export default function MintingInterface() {
         qrDiv.style.justifyContent = "center";
 
         // Generate QR code into the separate div
-        await dAppConnect.generateQRCode(qrDiv);
+        await dAppConnectInstance.generateQRCode(qrDiv);
 
         // Find container and append the QR div
         const container = document.getElementById("cip45-qr-container");
@@ -973,55 +1110,535 @@ export default function MintingInterface() {
     }
   };
 
-  // Sign credential request
-  const signCredentialRequest = async () => {
-    if (!veridianApi || !veridianApi.experimental?.signWithCredential) {
-      console.error("CIP-45 API not available");
+  // Request credential disclosure from credential server
+  // Matches credential-server-ui implementation
+  const requestDisclosure = async (
+    schemaSaid: string,
+    aid: string,
+    attributes?: Record<string, string>
+  ) => {
+    const credentialServerUrl =
+      process.env.NEXT_PUBLIC_CREDENTIAL_SERVER_URL ||
+      "https://cred-issuance.dev.idw-sandboxes.cf-deployments.org";
+
+    try {
+      // Build request body matching credential-server-ui pattern
+      const requestBody: any = {
+        schemaSaid,
+        aid,
+      };
+
+      // Add attributes if provided (following credential-server-ui pattern)
+      // They wrap attributes in { attribute: { ... } } structure
+      if (attributes && Object.keys(attributes).length > 0) {
+        const attribute: Record<string, string> = {};
+        Object.entries(attributes).forEach(([key, value]) => {
+          if (key && value) attribute[key] = value;
+        });
+
+        if (Object.keys(attribute).length) {
+          requestBody.attribute = attribute;
+        }
+      }
+
+      const response = await fetch(`${credentialServerUrl}/requestDisclosure`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorData = await response
+          .json()
+          .catch(() => ({ data: "Unknown error" }));
+        throw new Error(
+          errorData.data || `HTTP error! status: ${response.status}`
+        );
+      }
+
+      const data = await response.json();
+      console.log("Disclosure request sent:", data);
+      return data;
+    } catch (error) {
+      console.error("Failed to request disclosure:", error);
+      throw error;
+    }
+  };
+
+  // Fetch credentials for a contact (aid) - used to check if credential was presented
+  const fetchContactCredentials = async (aid: string) => {
+    const credentialServerUrl =
+      process.env.NEXT_PUBLIC_CREDENTIAL_SERVER_URL ||
+      "https://cred-issuance.dev.idw-sandboxes.cf-deployments.org";
+
+    try {
+      const response = await fetch(
+        `${credentialServerUrl}/contactCredentials?contactId=${aid}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response
+          .json()
+          .catch(() => ({ data: "Unknown error" }));
+        throw new Error(
+          errorData.data || `HTTP error! status: ${response.status}`
+        );
+      }
+
+      const data = await response.json();
+      return data.data || []; // Returns array of credentials
+    } catch (error) {
+      console.error("Failed to fetch contact credentials:", error);
+      throw error;
+    }
+  };
+
+  // Store polling interval reference for cleanup
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Format a credential for display and NFT metadata
+  const formatCredential = (matchingCredential: any) => {
+    // Extract credential attributes from sad.a (excluding metadata fields)
+    const attributes = matchingCredential.sad?.a || {};
+    const credentialAttributes: Record<string, any> = {};
+
+    // Filter out metadata fields (d, i, dt, ri, s) and keep only actual attributes
+    Object.keys(attributes).forEach((key) => {
+      if (!["d", "i", "dt", "ri", "s"].includes(key)) {
+        credentialAttributes[key] = attributes[key];
+      }
+    });
+
+    // Format credential response with extracted attributes
+    const credentialData = {
+      schemaSaid:
+        matchingCredential.sad?.s || matchingCredential.schema?.$id || "",
+      status: "presented",
+      credential: matchingCredential,
+      credentials: {
+        credentialType:
+          matchingCredential.schema?.credentialType ||
+          matchingCredential.schema?.title ||
+          "Unknown Credential Type",
+        credentialTitle: matchingCredential.schema?.title || "",
+        issueeId: matchingCredential.sad?.a?.i || "",
+        issuanceDateTime: matchingCredential.sad?.a?.dt || "",
+        credentialProperties: {
+          version: matchingCredential.schema?.version || "",
+          issueeAid: matchingCredential.sad?.i || "",
+          credentialStatusRegistry: matchingCredential.sad?.ri || "",
+          schemaSaid: matchingCredential.sad?.s || "",
+        },
+        credential: matchingCredential,
+        attributes: credentialAttributes,
+        connections: [],
+      },
+      validation: {
+        isValid: matchingCredential.status?.s === "0",
+        timestamp: new Date(
+          matchingCredential.status?.dt || Date.now()
+        ).toISOString(),
+        expiresAt: new Date(
+          Date.now() + 365 * 24 * 60 * 60 * 1000
+        ).toISOString(),
+      },
+      timestamp: new Date().toISOString(),
+    };
+
+    return credentialData;
+  };
+
+  // Extract minimal credential data for NFT metadata (removes verbose fields)
+  const extractCredentialForNFT = (credentialResponse: any) => {
+    if (!credentialResponse || credentialResponse.status !== "presented") {
+      return null;
+    }
+
+    // Extract only the essential fields needed for NFT metadata
+    const minimalCredential = {
+      credentialType:
+        credentialResponse.credentials?.credentialType ||
+        credentialResponse.schemaSaid ||
+        "",
+      credentialTitle: credentialResponse.credentials?.credentialTitle || "",
+      issueeId: credentialResponse.credentials?.issueeId || "",
+      issuanceDateTime: credentialResponse.credentials?.issuanceDateTime || "",
+      credentialProperties: {
+        version:
+          credentialResponse.credentials?.credentialProperties?.version || "",
+        issueeAid:
+          credentialResponse.credentials?.credentialProperties?.issueeAid || "",
+        credentialStatusRegistry:
+          credentialResponse.credentials?.credentialProperties
+            ?.credentialStatusRegistry || "",
+        schemaSaid:
+          credentialResponse.credentials?.credentialProperties?.schemaSaid ||
+          "",
+      },
+      // Include attributes if they exist (these are the actual credential data)
+      ...(credentialResponse.credentials?.attributes &&
+      Object.keys(credentialResponse.credentials.attributes).length > 0
+        ? { attributes: credentialResponse.credentials.attributes }
+        : {}),
+      // Include connections if they exist
+      ...(credentialResponse.credentials?.connections &&
+      credentialResponse.credentials.connections.length > 0
+        ? { connections: credentialResponse.credentials.connections }
+        : { connections: [] }),
+    };
+
+    return minimalCredential;
+  };
+
+  // Poll for credential presentation after request
+  const pollForCredential = (
+    schemaSaid: string,
+    aid: string,
+    maxAttempts: number = 30,
+    intervalMs: number = 2000
+  ) => {
+    // Clear any existing polling interval
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+    }
+
+    setIsPollingCredentials(true);
+    let attempts = 0;
+
+    const pollInterval = setInterval(async () => {
+      attempts++;
+
+      try {
+        const credentials = await fetchContactCredentials(aid);
+
+        // Find credential matching the requested schemaSaid
+        const matchingCredential = credentials.find((cred: any) => {
+          // Check if credential matches the schemaSaid
+          return cred.schema?.$id === schemaSaid || cred.sad?.s === schemaSaid;
+        });
+
+        if (matchingCredential) {
+          clearInterval(pollInterval);
+          pollingIntervalRef.current = null;
+          setIsPollingCredentials(false);
+
+          // Extract credential attributes from sad.a (excluding metadata fields)
+          const attributes = matchingCredential.sad?.a || {};
+          const credentialAttributes: Record<string, any> = {};
+
+          // Filter out metadata fields (d, i, dt, ri, s) and keep only actual attributes
+          Object.keys(attributes).forEach((key) => {
+            // Skip metadata fields - these are not user attributes
+            if (!["d", "i", "dt", "ri", "s"].includes(key)) {
+              credentialAttributes[key] = attributes[key];
+            }
+          });
+
+          // Format credential response with extracted attributes
+          // credentialType is the programmatic credential type identifier (e.g., "RareEvo2024AttendeeCredential")
+          // credentialProperties contains metadata fields from the credential schema and SAD
+          const credentialData = {
+            schemaSaid: schemaSaid,
+            status: "presented",
+            credential: matchingCredential,
+            credentials: {
+              credentialType:
+                matchingCredential.schema?.credentialType ||
+                matchingCredential.schema?.title ||
+                "Unknown Credential Type", // Programmatic credential type identifier
+              credentialTitle: matchingCredential.schema?.title || "",
+              issueeId: matchingCredential.sad?.a?.i || "", // Issuee AID from the attributes block
+              issuanceDateTime: matchingCredential.sad?.a?.dt || "", // Issuance date time from the attributes block
+              credentialProperties: {
+                version: matchingCredential.schema?.version || "",
+                issueeAid: matchingCredential.sad?.i || "", // Main Issuee AID from SAD
+                credentialStatusRegistry: matchingCredential.sad?.ri || "", // Credential Status Registry from SAD
+                schemaSaid: matchingCredential.sad?.s || "", // Schema SAID from SAD
+              },
+              credential: matchingCredential,
+              // Extract actual credential attributes (like attendeeName, etc.)
+              attributes: credentialAttributes,
+              connections: [],
+            },
+            validation: {
+              isValid: matchingCredential.status?.s === "0", // 0 = issued, 1 = revoked
+              timestamp: new Date(
+                matchingCredential.status?.dt || Date.now()
+              ).toISOString(),
+              expiresAt: new Date(
+                Date.now() + 365 * 24 * 60 * 60 * 1000
+              ).toISOString(),
+            },
+            timestamp: new Date().toISOString(),
+          };
+
+          setCredentialResponse(credentialData);
+          console.log("Credential presented:", credentialData);
+          console.log("Credential attributes extracted:", credentialAttributes);
+          return;
+        }
+
+        // Stop polling after max attempts
+        if (attempts >= maxAttempts) {
+          clearInterval(pollInterval);
+          pollingIntervalRef.current = null;
+          setIsPollingCredentials(false);
+          setCredentialError(
+            "Timeout waiting for credential presentation. Please check your wallet and try again."
+          );
+        }
+      } catch (error) {
+        console.error("Error polling for credential:", error);
+        // Continue polling on error (might be temporary network issue)
+        if (attempts >= maxAttempts) {
+          clearInterval(pollInterval);
+          pollingIntervalRef.current = null;
+          setIsPollingCredentials(false);
+        }
+      }
+    }, intervalMs);
+
+    pollingIntervalRef.current = pollInterval;
+  };
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        setIsPollingCredentials(false);
+      }
+    };
+  }, []);
+
+  // Verify wallet ownership by signing a message (following CIP-45 demo pattern)
+  const verifyWalletOwnership = async () => {
+    if (!isCIP45Connected || !walletIdentifier || !veridianApi) {
+      alert("Please connect your Veridian wallet first.");
       return;
     }
 
     try {
+      setIsSigningOwnership(true);
+
+      // Generate a message to sign for wallet ownership proof
+      const ownershipMessage = `Verify wallet ownership for CNFT Maker\n\nWallet: ${walletIdentifier}\nTimestamp: ${new Date().toISOString()}\n\nThis signature proves you own this wallet.`;
+
+      // Get the wallet API from window.cardano using the stored wallet name
+      // @ts-ignore
+      const api = window.cardano && window.cardano[walletName];
+
+      if (!api) {
+        throw new Error("Wallet API not available");
+      }
+
+      const enabledApi = await api.enable();
+
+      // Sign message using signKeri (following CIP-45 demo pattern)
+      // @ts-ignore
+      if (!enabledApi.experimental?.signKeri) {
+        throw new Error("signKeri method not available");
+      }
+
+      // @ts-ignore
+      const signature = await enabledApi.experimental.signKeri(
+        walletIdentifier,
+        ownershipMessage
+      );
+
+      setOwnershipSignature(signature);
+      setWalletOwnershipVerified(true);
+      console.log("Wallet ownership verified:", signature);
+    } catch (error: any) {
+      console.error("Failed to verify wallet ownership:", error);
+      if (error.code === 2) {
+        alert("Wallet ownership verification declined. Please try again.");
+      } else {
+        alert(
+          `Failed to verify wallet ownership: ${
+            error.message || "Unknown error"
+          }`
+        );
+      }
+    } finally {
+      setIsSigningOwnership(false);
+    }
+  };
+
+  // Verify credential usage for minting (CIP-45 signature required)
+  const verifyCredentialForMinting = async (
+    issueeId: string,
+    credentialTitle?: string
+  ): Promise<string> => {
+    if (!isCIP45Connected || !walletIdentifier || !veridianApi) {
+      throw new Error(
+        "CIP-45 connection required. Please connect your Veridian wallet first."
+      );
+    }
+
+    try {
+      // Create a message for credential usage confirmation
+      const mintingMessage = `Confirm NFT Minting with Credential
+
+Credential: ${credentialTitle || "Unknown"}
+Issuee ID: ${issueeId}
+Collection: ${collectionName || "Unknown"}
+Timestamp: ${new Date().toISOString()}
+
+By signing this message, you confirm that you are using your credential to mint an NFT on this site.`;
+
+      // Get the wallet API from window.cardano using the stored wallet name
+      // @ts-ignore
+      const api = window.cardano && window.cardano[walletName];
+
+      if (!api) {
+        throw new Error("Wallet API not available");
+      }
+
+      const enabledApi = await api.enable();
+
+      // Sign message using signKeri
+      // @ts-ignore
+      if (!enabledApi.experimental?.signKeri) {
+        throw new Error("signKeri method not available");
+      }
+
+      // @ts-ignore
+      const signature = await enabledApi.experimental.signKeri(
+        walletIdentifier,
+        mintingMessage
+      );
+
+      console.log("Credential usage verified for minting:", signature);
+      return signature;
+    } catch (error: any) {
+      console.error("Failed to verify credential for minting:", error);
+      if (error.code === 2) {
+        throw new Error("Credential confirmation declined. Please try again.");
+      } else {
+        throw new Error(
+          `Failed to verify credential: ${error.message || "Unknown error"}`
+        );
+      }
+    }
+  };
+
+  // Fetch available credentials
+  const fetchAvailableCredentials = async () => {
+    if (!isCIP45Connected) {
+      alert("Please connect your Veridian wallet first.");
+      return;
+    }
+
+    if (!walletIdentifier) {
+      alert("Wallet identifier not available. Please reconnect your wallet.");
+      return;
+    }
+
+    if (!walletOwnershipVerified) {
+      alert(
+        "Please verify wallet ownership first by signing the ownership message."
+      );
+      return;
+    }
+
+    // Clear previous errors and responses
+    setCredentialError("");
+    setCredentialResponse(null);
+    setAvailableCredentials([]);
+    setSelectedCredentialIndex(null);
+
+    try {
       setIsValidatingSignature(true);
 
-      const signRequest = await veridianApi.experimental.signWithCredential({
-        assetId: credentialRequest.assetId,
-        credentialType: credentialRequest.credentialType,
-        message: `Mint NFT for verified developer - ${credentialRequest.assetId}`,
+      console.log("Fetching available credentials...", {
+        aid: walletIdentifier,
       });
 
-      console.log("Credential signature response:", signRequest);
+      const credentials = await fetchContactCredentials(walletIdentifier);
 
-      // Process the signature response
-      const credentialData = {
-        assetId: credentialRequest.assetId,
-        credentialType: credentialRequest.credentialType,
-        credentials: {
-          credentialId: signRequest.identifier || "cred_" + Date.now(),
-          issuer: {
-            name: "Veridian Wallet",
-            url: "https://veridian.io",
-          },
-          signature: signRequest.signature,
-          credential: signRequest.credential, // ACDC credential
-          identifier: signRequest.identifier, // KERI identifier
-          connections: [], // Will be populated from credential data
-        },
-        validation: {
-          isValid: true,
-          timestamp: new Date().toISOString(),
-          expiresAt: new Date(
-            Date.now() + 365 * 24 * 60 * 60 * 1000
-          ).toISOString(),
-        },
-      };
-
-      setCredentialResponse(credentialData);
-      setCredentialSignature(signRequest.signature);
-    } catch (error) {
-      console.error("Failed to sign credential request:", error);
-      alert("Failed to sign credential request. Please try again.");
+      if (credentials && credentials.length > 0) {
+        setAvailableCredentials(credentials);
+        console.log(`Found ${credentials.length} credential(s)`);
+      } else {
+        setCredentialError("No credentials found for this wallet.");
+      }
+    } catch (fetchError: any) {
+      console.error("Failed to fetch contact credentials:", fetchError);
+      setCredentialError(
+        `Failed to fetch credentials: ${fetchError.message || "Unknown error"}`
+      );
     } finally {
       setIsValidatingSignature(false);
+    }
+  };
+
+  // Handle credential selection
+  useEffect(() => {
+    if (selectedCredentialIndex !== null && availableCredentials.length > 0) {
+      const selectedCredential = availableCredentials[selectedCredentialIndex];
+      if (selectedCredential) {
+        const formattedCredential = formatCredential(selectedCredential);
+        setCredentialResponse(formattedCredential);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCredentialIndex, availableCredentials]);
+
+  // Apply selected credential to NFT metadata
+  const applyCredentialToMetadata = () => {
+    if (!credentialResponse || credentialResponse.status !== "presented") {
+      alert("Please select a credential first.");
+      return;
+    }
+
+    try {
+      // Parse current metadata
+      const parsedMetadata = JSON.parse(nftMetadata || "{}");
+
+      // Extract the formatted credential data
+      const credentialData = extractCredentialForNFT(credentialResponse);
+
+      if (!credentialData) {
+        alert("Failed to extract credential data.");
+        return;
+      }
+
+      // Update credentials for all NFT assets in the metadata
+      const updatedMetadata = { ...parsedMetadata };
+      Object.keys(updatedMetadata).forEach((assetName) => {
+        if (
+          updatedMetadata[assetName] &&
+          typeof updatedMetadata[assetName] === "object"
+        ) {
+          updatedMetadata[assetName] = {
+            ...updatedMetadata[assetName],
+            credentials: credentialData,
+          };
+        }
+      });
+
+      // Update the metadata state
+      setNftMetadata(JSON.stringify(updatedMetadata, null, 2));
+
+      alert(
+        `Credential applied to ${
+          Object.keys(updatedMetadata).length
+        } NFT(s) in metadata.`
+      );
+    } catch (error) {
+      console.error("Failed to apply credential to metadata:", error);
+      alert(
+        "Failed to apply credential. Please check that your metadata JSON is valid."
+      );
     }
   };
 
@@ -1050,8 +1667,7 @@ export default function MintingInterface() {
       console.error("Failed to parse Veridian signature:", error);
       // For demo purposes, return mock data
       const mockResponse = {
-        assetId: credentialRequest.assetId,
-        credentialType: credentialRequest.credentialType,
+        schemaSaid: credentialRequest.schemaSaid,
         credentials: {
           credentialId: "cred_" + Date.now(),
           issuer: {
@@ -1914,10 +2530,71 @@ export default function MintingInterface() {
                     )}
                   </div>
 
+                  {/* Show alert if credentials require CIP-45 signature */}
+                  {(() => {
+                    try {
+                      const parsedMetadata = JSON.parse(nftMetadata || "{}");
+                      let hasCredentialsWithIssueeId = false;
+                      Object.keys(parsedMetadata).forEach((assetName) => {
+                        const asset = parsedMetadata[assetName];
+                        if (
+                          asset?.credentials?.issueeId &&
+                          asset.credentials.issueeId.trim() !== ""
+                        ) {
+                          hasCredentialsWithIssueeId = true;
+                        }
+                      });
+
+                      if (hasCredentialsWithIssueeId && !isCIP45Connected) {
+                        return (
+                          <Alert className="border-yellow-500 mb-4">
+                            <Shield className="h-4 w-4 text-yellow-600" />
+                            <AlertDescription>
+                              <p className="text-sm text-yellow-600 font-medium">
+                                CIP-45 connection required
+                              </p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Your NFT metadata includes credentials. Please
+                                connect your Veridian wallet to sign and confirm
+                                credential usage before minting.
+                              </p>
+                            </AlertDescription>
+                          </Alert>
+                        );
+                      }
+
+                      if (
+                        hasCredentialsWithIssueeId &&
+                        isSigningCredentialMint
+                      ) {
+                        return (
+                          <Alert className="border-blue-500 mb-4">
+                            <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                            <AlertDescription>
+                              <p className="text-sm text-blue-600 font-medium">
+                                Please sign the CIP-45 message in your wallet
+                              </p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                A signature request will appear in your Veridian
+                                wallet. Please approve it to confirm credential
+                                usage for minting.
+                              </p>
+                            </AlertDescription>
+                          </Alert>
+                        );
+                      }
+
+                      return null;
+                    } catch {
+                      return null;
+                    }
+                  })()}
+
                   <Button
                     onClick={handleMint}
                     disabled={
                       isMinting ||
+                      isSigningCredentialMint ||
                       !connected ||
                       (mintMode === "new" && !collectionName.trim()) ||
                       (mintMode === "existing" && !selectedPolicy)
@@ -1925,17 +2602,22 @@ export default function MintingInterface() {
                     className="w-full"
                     size="lg"
                   >
-                    {isMinting ? (
+                    {isSigningCredentialMint ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Waiting for signature...
+                      </>
+                    ) : isMinting ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin mr-2" />
                         {mintMode === "new"
-                          ? "Creating Collection..."
-                          : "Adding to Collection..."}
+                          ? "Minting NFT(s)..."
+                          : "Minting NFT(s) to Collection..."}
                       </>
                     ) : mintMode === "new" ? (
-                      "Create Collection"
+                      "Mint NFT(s)"
                     ) : (
-                      "Add to Collection"
+                      "Mint NFT(s)"
                     )}
                   </Button>
 
@@ -2091,25 +2773,47 @@ export default function MintingInterface() {
                         </div>
                       )}
 
-                      {isConnectingCIP45 && (
-                        <div className="flex items-center justify-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          <span className="text-xs text-muted-foreground">
-                            Connecting...
-                          </span>
+                      {/* Wallet Identifier (AID) Display */}
+                      {walletIdentifier && (
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Wallet Identifier (AID)
+                          </p>
+                          <div className="flex items-center gap-2 p-2 bg-muted rounded-md">
+                            <code className="text-xs flex-1 truncate font-mono">
+                              {walletIdentifier}
+                            </code>
+                            <CopyButton text={walletIdentifier} />
+                          </div>
                         </div>
                       )}
-                      {isCIP45Connected && (
-                        <Badge variant="default" className="text-green-600">
-                          Connected
-                        </Badge>
-                      )}
+
+                      <div className="flex w-full justify-center items-center gap-2">
+                        {isConnectingCIP45 && (
+                          <div className="flex items-center justify-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span className="text-xs text-muted-foreground">
+                              Connecting...
+                            </span>
+                          </div>
+                        )}
+                        {isCIP45Connected && (
+                          <Badge variant="default" className="text-green-600">
+                            Connected
+                          </Badge>
+                        )}
+                        {walletOwnershipVerified && (
+                          <Badge variant="default" className="text-green-600">
+                            Ownership Verified
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Connection Button */}
-                {!isCIP45Connected && (
+                {/* Connection/Disconnection Buttons */}
+                {!isCIP45Connected ? (
                   <Button
                     onClick={initializeCIP45}
                     disabled={isConnectingCIP45}
@@ -2128,153 +2832,391 @@ export default function MintingInterface() {
                       </>
                     )}
                   </Button>
-                )}
-
-                {/* Credential Request Section */}
-                <div className="space-y-2">
-                  <Label htmlFor="credential-request">
-                    Credential Request (JSON)
-                  </Label>
-                  <div className="border rounded-md overflow-hidden">
-                    <Editor
-                      height="100px"
-                      defaultLanguage="json"
-                      value={JSON.stringify(credentialRequest, null, 2)}
-                      onChange={(value) => {
-                        try {
-                          const parsed = JSON.parse(value || "{}");
-                          setCredentialRequest(parsed);
-                        } catch (error) {
-                          // Invalid JSON, keep current value
+                ) : (
+                  <div className="space-y-2">
+                    {!walletOwnershipVerified ? (
+                      <Button
+                        onClick={verifyWalletOwnership}
+                        disabled={isSigningOwnership || !walletIdentifier}
+                        variant="default"
+                        className="w-full"
+                      >
+                        {isSigningOwnership ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            Verifying Ownership...
+                          </>
+                        ) : (
+                          <>
+                            <Shield className="h-4 w-4 mr-2" />
+                            Verify Wallet Ownership
+                          </>
+                        )}
+                      </Button>
+                    ) : (
+                      <Alert className="border-green-500">
+                        <CheckCircle className="h-4 w-4 text-green-600" />
+                        <AlertDescription>
+                          <p className="text-sm text-green-600 font-medium">
+                            Wallet ownership verified
+                          </p>
+                          {ownershipSignature && (
+                            <div className="mt-2 flex items-center gap-2">
+                              <code className="text-xs flex-1 truncate font-mono bg-muted p-1 rounded">
+                                {ownershipSignature.slice(0, 20)}...
+                              </code>
+                              <CopyButton text={ownershipSignature} />
+                            </div>
+                          )}
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    <Button
+                      onClick={() => {
+                        if (dAppConnect) {
+                          try {
+                            dAppConnect.close();
+                          } catch (error) {
+                            console.error("Error disconnecting:", error);
+                          }
+                        }
+                        // Reset connection state
+                        setIsCIP45Connected(false);
+                        setWalletIdentifier("");
+                        setVeridianApi(null);
+                        setMeerkatId("");
+                        setCip45QRCode("");
+                        setCredentialError("");
+                        setCredentialResponse(null);
+                        setWalletOwnershipVerified(false);
+                        setOwnershipSignature("");
+                        setWalletName("idw_p2p"); // Reset to default
+                        // Stop polling on disconnect
+                        if (pollingIntervalRef.current) {
+                          clearInterval(pollingIntervalRef.current);
+                          pollingIntervalRef.current = null;
+                          setIsPollingCredentials(false);
+                        }
+                        // Clear QR code container
+                        const container =
+                          document.getElementById("cip45-qr-container");
+                        if (container) {
+                          container.innerHTML = "";
                         }
                       }}
-                      options={{
-                        minimap: { enabled: false },
-                        scrollBeyondLastLine: false,
-                        fontSize: 12,
-                        lineNumbers: "on",
-                        wordWrap: "on",
-                        automaticLayout: true,
-                        readOnly: false,
-                      }}
-                      theme="vs-dark"
-                    />
+                      variant="outline"
+                      className="w-full border-red-500 text-red-600 hover:bg-red-50 hover:text-red-700"
+                    >
+                      <Power className="h-4 w-4 mr-2" />
+                      Disconnect Wallet
+                    </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    This JSON payload requests the wallet to present credentials
-                    for the specified NFT asset
-                  </p>
-                </div>
+                )}
 
-                {/* Sign Message Button */}
+                {/* Fetch Credentials Button */}
                 <Button
                   className="w-full"
-                  onClick={signCredentialRequest}
-                  disabled={!isCIP45Connected || isValidatingSignature}
-                  variant={isCIP45Connected ? "default" : "outline"}
+                  onClick={fetchAvailableCredentials}
+                  disabled={
+                    !isCIP45Connected ||
+                    !walletIdentifier ||
+                    !walletOwnershipVerified ||
+                    isValidatingSignature
+                  }
+                  variant={
+                    isCIP45Connected &&
+                    walletIdentifier &&
+                    walletOwnershipVerified
+                      ? "default"
+                      : "outline"
+                  }
                 >
                   {isValidatingSignature ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      Signing...
+                      Fetching...
                     </>
-                  ) : isCIP45Connected ? (
+                  ) : isCIP45Connected &&
+                    walletIdentifier &&
+                    walletOwnershipVerified ? (
                     <>
                       <Shield className="h-4 w-4 mr-2" />
-                      Sign Message
+                      Fetch Credentials
                     </>
                   ) : (
                     <>
                       <Shield className="h-4 w-4 mr-2" />
-                      Connect Wallet First
+                      {!isCIP45Connected
+                        ? "Connect Wallet First"
+                        : !walletIdentifier
+                        ? "Waiting for Wallet ID..."
+                        : !walletOwnershipVerified
+                        ? "Verify Ownership First"
+                        : "Fetch Credentials"}
                     </>
                   )}
                 </Button>
 
-                {/* Credential Response Display */}
-                {credentialResponse && (
+                {/* Credentials List */}
+                {availableCredentials.length > 0 && (
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="credential-response">
-                        Credential Response (JSON)
-                      </Label>
-                      <div className="flex items-center gap-2">
-                        <CopyButton
-                          text={JSON.stringify(credentialResponse, null, 2)}
-                        />
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            parseVeridianSignature(
-                              credentialResponse.credentials?.signature || ""
-                            )
-                          }
-                          disabled={isValidatingSignature}
-                        >
-                          {isValidatingSignature ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                              Validating...
-                            </>
-                          ) : (
-                            "Re-validate"
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="border rounded-md overflow-hidden">
-                      <Editor
-                        height="250px"
-                        defaultLanguage="json"
-                        value={JSON.stringify(credentialResponse, null, 2)}
-                        options={{
-                          minimap: { enabled: false },
-                          scrollBeyondLastLine: false,
-                          fontSize: 12,
-                          lineNumbers: "on",
-                          wordWrap: "on",
-                          automaticLayout: true,
-                          readOnly: true,
+                    <Label htmlFor="credential-select">
+                      Select Credential ({availableCredentials.length}{" "}
+                      available)
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={
+                          selectedCredentialIndex !== null
+                            ? selectedCredentialIndex.toString()
+                            : ""
+                        }
+                        onValueChange={(value) => {
+                          setSelectedCredentialIndex(parseInt(value));
                         }}
-                        theme="vs-dark"
-                      />
+                      >
+                        <SelectTrigger className="flex-1">
+                          <SelectValue placeholder="Choose a credential..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableCredentials.map(
+                            (cred: any, index: number) => {
+                              const credentialType =
+                                cred.schema?.credentialType ||
+                                cred.schema?.title ||
+                                "Unknown Credential";
+                              const schemaSaid =
+                                cred.sad?.s || cred.schema?.$id || "";
+                              return (
+                                <SelectItem
+                                  key={index}
+                                  value={index.toString()}
+                                >
+                                  {credentialType} ({schemaSaid.slice(0, 8)}...)
+                                </SelectItem>
+                              );
+                            }
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        onClick={applyCredentialToMetadata}
+                        disabled={
+                          selectedCredentialIndex === null ||
+                          !credentialResponse ||
+                          credentialResponse.status !== "presented"
+                        }
+                        variant="default"
+                        size="sm"
+                        className="whitespace-nowrap"
+                      >
+                        Apply
+                      </Button>
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <CheckCircle className="h-4 w-4" />
-                      <span>
-                        Copy this JSON and replace the "credentials" value in
-                        your NFT metadata
-                      </span>
-                    </div>
-                    {credentialResponse.validation && (
-                      <div className="flex items-center gap-2 text-xs">
-                        <Badge
-                          variant={
-                            credentialResponse.validation.isValid
-                              ? "default"
-                              : "destructive"
-                          }
-                          className="text-xs"
-                        >
-                          {credentialResponse.validation.isValid
-                            ? "Valid"
-                            : "Invalid"}
-                        </Badge>
-                        <span className="text-muted-foreground">
-                          Expires:{" "}
-                          {new Date(
-                            credentialResponse.validation.expiresAt
-                          ).toLocaleDateString()}
-                        </span>
-                      </div>
-                    )}
                   </div>
                 )}
 
-                <p className="text-xs text-muted-foreground text-center">
-                  Credential signing functionality coming soon
-                </p>
+                {/* Error Display */}
+                {credentialError && (
+                  <Alert className="border-red-500">
+                    <XCircle className="h-4 w-4" />
+                    <AlertDescription>
+                      <div className="space-y-2">
+                        <p className="font-medium text-red-600">
+                          Failed to Fetch Credentials
+                        </p>
+                        <p className="text-sm">{credentialError}</p>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Possible reasons:
+                        </p>
+                        <ul className="text-xs text-muted-foreground list-disc list-inside space-y-1">
+                          <li>No credentials are available for this wallet</li>
+                          <li>
+                            The credential server is not running or unreachable
+                          </li>
+                          <li>Network connection issues</li>
+                        </ul>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {/* Credential Response Display */}
+                {credentialResponse &&
+                  credentialResponse.status === "presented" && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="credential-response">
+                          Formatted Credential (Ready for NFT Metadata)
+                        </Label>
+                        <CopyButton
+                          text={JSON.stringify(
+                            extractCredentialForNFT(credentialResponse),
+                            null,
+                            2
+                          )}
+                          className="bg-blue-600 hover:bg-blue-700 text-white"
+                        />
+                      </div>
+                      <div className="border rounded-md overflow-hidden">
+                        <Editor
+                          height="300px"
+                          defaultLanguage="json"
+                          value={JSON.stringify(
+                            extractCredentialForNFT(credentialResponse),
+                            null,
+                            2
+                          )}
+                          options={{
+                            minimap: { enabled: false },
+                            scrollBeyondLastLine: false,
+                            fontSize: 12,
+                            lineNumbers: "on",
+                            wordWrap: "on",
+                            automaticLayout: true,
+                            readOnly: true,
+                          }}
+                          theme="vs-dark"
+                        />
+                      </div>
+                      {credentialResponse.status === "presented" && (
+                        <Alert className="border-blue-500">
+                          <CheckCircle className="h-4 w-4 text-blue-600" />
+                          <AlertDescription>
+                            <div className="space-y-2">
+                              <p className="text-sm text-blue-600 font-medium">
+                                Credential ready for NFT metadata
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                The "Copy" button above copies the minimal
+                                credential data (without verbose fields). This
+                                includes only:
+                              </p>
+                              <ul className="text-xs text-muted-foreground list-disc list-inside space-y-1 ml-2">
+                                <li>
+                                  credentialType - Credential type identifier
+                                </li>
+                                <li>
+                                  credentialProperties - Credential metadata
+                                  (version, issueeAid, etc.)
+                                </li>
+                                <li>
+                                  attributes - Credential data (if available)
+                                </li>
+                                <li>
+                                  connections - Social links (if available)
+                                </li>
+                              </ul>
+                              <p className="text-xs text-muted-foreground mt-2">
+                                Replace the "credentials" value in your NFT
+                                metadata JSON with the copied data.
+                              </p>
+                            </div>
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                      {credentialResponse.status === "error" && (
+                        <Alert className="border-red-500">
+                          <XCircle className="h-4 w-4" />
+                          <AlertDescription>
+                            <p className="text-sm">
+                              {credentialResponse.error}
+                            </p>
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                      {credentialResponse.status === "requested" && (
+                        <Alert className="border-blue-500">
+                          <div className="flex items-center gap-2">
+                            {isPollingCredentials && (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            )}
+                            <CheckCircle className="h-4 w-4" />
+                          </div>
+                          <AlertDescription>
+                            <p className="text-sm">
+                              {credentialResponse.message}
+                            </p>
+                            {isPollingCredentials && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Polling for credential presentation...
+                              </p>
+                            )}
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                      {credentialResponse.status === "presented" && (
+                        <>
+                          <Alert className="border-green-500">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <AlertDescription>
+                              <p className="text-sm text-green-600 font-medium">
+                                Credential successfully presented!
+                              </p>
+                            </AlertDescription>
+                          </Alert>
+
+                          {/* Display Credential Attributes */}
+                          {credentialResponse.credentials?.attributes &&
+                            Object.keys(
+                              credentialResponse.credentials.attributes
+                            ).length > 0 && (
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle className="text-sm">
+                                    Credential Attributes
+                                  </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                  <div className="space-y-2">
+                                    {Object.entries(
+                                      credentialResponse.credentials.attributes
+                                    ).map(([key, value]) => (
+                                      <div
+                                        key={key}
+                                        className="flex justify-between items-center p-2 border rounded-md"
+                                      >
+                                        <span className="text-sm font-medium capitalize">
+                                          {key
+                                            .replace(/([A-Z])/g, " $1")
+                                            .trim()}
+                                          :
+                                        </span>
+                                        <span className="text-sm text-muted-foreground font-mono">
+                                          {String(value)}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            )}
+                        </>
+                      )}
+                      {credentialResponse.validation && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <Badge
+                            variant={
+                              credentialResponse.validation.isValid
+                                ? "default"
+                                : "destructive"
+                            }
+                            className="text-xs"
+                          >
+                            {credentialResponse.validation.isValid
+                              ? "Valid"
+                              : "Invalid"}
+                          </Badge>
+                          <span className="text-muted-foreground">
+                            Expires:{" "}
+                            {new Date(
+                              credentialResponse.validation.expiresAt
+                            ).toLocaleDateString()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
               </div>
             </CardContent>
           )}

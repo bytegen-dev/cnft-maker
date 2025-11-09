@@ -14,6 +14,9 @@ import { BurnDialog } from "./BurnDialog";
 import { Separator } from "@/components/ui/separator";
 import { FaTelegram, FaXTwitter } from "react-icons/fa6";
 import { CopyButton } from "@/components/ui/copy-button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Loader2, XCircle } from "lucide-react";
+import { useState } from "react";
 
 interface NFTDetailsDialogProps {
   isOpen: boolean;
@@ -52,6 +55,161 @@ export function NFTDetailsDialog({
   setIsBurning,
   walletInfo,
 }: NFTDetailsDialogProps) {
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState<{
+    isValid: boolean;
+    message: string;
+    details?: any;
+  } | null>(null);
+
+  // Validate credential by checking against credential server
+  const validateCredential = async () => {
+    if (!selectedNft?.metadata?.credentials) {
+      setValidationResult({
+        isValid: false,
+        message: "No credentials found in NFT metadata",
+      });
+      return;
+    }
+
+    setIsValidating(true);
+    setValidationResult(null);
+
+    try {
+      const credentials = selectedNft.metadata.credentials;
+      const credentialServerUrl =
+        process.env.NEXT_PUBLIC_CREDENTIAL_SERVER_URL ||
+        "https://cred-issuance.dev.idw-sandboxes.cf-deployments.org";
+
+      // Check if we have the necessary data for validation
+      if (!credentials.issueeId) {
+        setValidationResult({
+          isValid: false,
+          message: "Cannot validate: Missing issuee ID",
+        });
+        setIsValidating(false);
+        return;
+      }
+
+      // Fetch credentials for the issuee ID from credential server
+      const response = await fetch(
+        `${credentialServerUrl}/contactCredentials?contactId=${credentials.issueeId}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch credentials: ${response.status} ${response.statusText}`
+        );
+      }
+
+      const data = await response.json();
+      const serverCredentials = data.data || [];
+
+      // Find matching credential by schema SAID
+      const schemaSaid =
+        credentials.credentialProperties?.schemaSaid || credentials.schemaSaid;
+
+      const matchingCredential = serverCredentials.find((cred: any) => {
+        return cred.sad?.s === schemaSaid || cred.schema?.$id === schemaSaid;
+      });
+
+      if (!matchingCredential) {
+        setValidationResult({
+          isValid: false,
+          message: "Credential not found on server",
+          details: {
+            reason: "The credential does not exist in the credential server",
+          },
+        });
+        setIsValidating(false);
+        return;
+      }
+
+      // Check credential status (0 = issued, 1 = revoked)
+      // Also check for rev object and status.et === "rev" as additional indicators
+      const status = matchingCredential.status?.s;
+      const eventType = matchingCredential.status?.et;
+      const hasRevObject = !!matchingCredential.rev;
+      const isRevoked = status === "1" || eventType === "rev" || hasRevObject;
+      const isIssued = status === "0" && eventType !== "rev" && !hasRevObject;
+
+      // Validate issuance date time if present
+      const issuanceDateTime = credentials.issuanceDateTime;
+      let isExpired = false;
+      if (issuanceDateTime) {
+        const issuanceDate = new Date(issuanceDateTime);
+        const now = new Date();
+        // Check if credential is older than 1 year (example expiration)
+        const oneYearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+        isExpired = issuanceDate < oneYearAgo;
+      }
+
+      // Build validation result
+      if (isRevoked) {
+        // Get revocation timestamp from rev object or status
+        const revokedAt =
+          matchingCredential.rev?.dt ||
+          matchingCredential.status?.dt ||
+          "Unknown";
+        setValidationResult({
+          isValid: false,
+          message: "Credential has been revoked",
+          details: {
+            status: "revoked",
+            revokedAt: revokedAt,
+            revocationSequence:
+              matchingCredential.rev?.s || matchingCredential.status?.s,
+          },
+        });
+      } else if (isExpired) {
+        setValidationResult({
+          isValid: false,
+          message: "Credential has expired",
+          details: {
+            status: "expired",
+            issuedAt: issuanceDateTime,
+          },
+        });
+      } else if (isIssued) {
+        setValidationResult({
+          isValid: true,
+          message: "Credential is valid",
+          details: {
+            status: "issued",
+            issuedAt: issuanceDateTime || matchingCredential.status?.dt,
+            schemaSaid: schemaSaid,
+            credentialType: credentials.credentialType,
+          },
+        });
+      } else {
+        setValidationResult({
+          isValid: false,
+          message: "Unknown credential status",
+          details: {
+            status: status,
+          },
+        });
+      }
+    } catch (error: any) {
+      console.error("Credential validation error:", error);
+      setValidationResult({
+        isValid: false,
+        message: `Validation failed: ${error.message || "Unknown error"}`,
+        details: {
+          error: error.message,
+        },
+      });
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
   const handleBurnClose = () => {
     setBurnDialogOpen(false);
     setSelectedAsset(null);
@@ -192,192 +350,345 @@ export function NFTDetailsDialog({
                 <div className="grid grid-cols-1 gap-3">
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-medium min-w-fit">
-                      Credential ID:
-                    </span>
-                    <div className="flex items-center gap-2 w-full justify-end">
-                      <span className="text-sm text-muted-foreground font-mono text-right max-w-[220px] truncate">
-                        {selectedNft.metadata.credentials.credentialId || "-"}
-                      </span>
-                      {selectedNft.metadata.credentials.credentialId && (
-                        <CopyButton
-                          text={selectedNft.metadata.credentials.credentialId}
-                        />
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium min-w-fit">
-                      Issued by:
+                      Credential Type:
                     </span>
                     <span className="text-sm text-muted-foreground text-right max-w-[220px] truncate">
-                      {selectedNft.metadata.credentials.issuer?.name || "-"}
+                      {selectedNft.metadata.credentials.credentialType || "-"}
                     </span>
                   </div>
 
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium min-w-fit">
-                      Signature:
-                    </span>
-                    <div className="flex items-center gap-2 w-full justify-end">
-                      <span className="text-sm text-muted-foreground font-mono text-right max-w-[220px] truncate">
-                        {selectedNft.metadata.credentials.signature || "-"}
+                  {selectedNft.metadata.credentials.credentialTitle && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium min-w-fit">
+                        Credential Title:
                       </span>
-                      {selectedNft.metadata.credentials.signature && (
-                        <CopyButton
-                          text={selectedNft.metadata.credentials.signature}
-                        />
-                      )}
+                      <span className="text-sm text-muted-foreground text-right max-w-[220px] truncate">
+                        {selectedNft.metadata.credentials.credentialTitle}
+                      </span>
                     </div>
-                  </div>
+                  )}
+
+                  {selectedNft.metadata.credentials.credentialProperties && (
+                    <>
+                      {selectedNft.metadata.credentials.credentialProperties
+                        .version && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium min-w-fit">
+                            Version:
+                          </span>
+                          <span className="text-sm text-muted-foreground text-right max-w-[220px] truncate">
+                            {
+                              selectedNft.metadata.credentials
+                                .credentialProperties.version
+                            }
+                          </span>
+                        </div>
+                      )}
+
+                      {selectedNft.metadata.credentials.credentialProperties
+                        .issueeAid && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium min-w-fit">
+                            Issuee AID:
+                          </span>
+                          <div className="flex items-center gap-2 w-full justify-end">
+                            <span className="text-sm text-muted-foreground font-mono text-right max-w-[220px] truncate">
+                              {
+                                selectedNft.metadata.credentials
+                                  .credentialProperties.issueeAid
+                              }
+                            </span>
+                            <CopyButton
+                              text={
+                                selectedNft.metadata.credentials
+                                  .credentialProperties.issueeAid
+                              }
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedNft.metadata.credentials.credentialProperties
+                        .credentialStatusRegistry && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium min-w-fit">
+                            Status Registry:
+                          </span>
+                          <div className="flex items-center gap-2 w-full justify-end">
+                            <span className="text-sm text-muted-foreground font-mono text-right max-w-[220px] truncate">
+                              {
+                                selectedNft.metadata.credentials
+                                  .credentialProperties.credentialStatusRegistry
+                              }
+                            </span>
+                            <CopyButton
+                              text={
+                                selectedNft.metadata.credentials
+                                  .credentialProperties.credentialStatusRegistry
+                              }
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedNft.metadata.credentials.credentialProperties
+                        .schemaSaid && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium min-w-fit">
+                            Schema SAID:
+                          </span>
+                          <div className="flex items-center gap-2 w-full justify-end">
+                            <span className="text-sm text-muted-foreground font-mono text-right max-w-[220px] truncate">
+                              {
+                                selectedNft.metadata.credentials
+                                  .credentialProperties.schemaSaid
+                              }
+                            </span>
+                            <CopyButton
+                              text={
+                                selectedNft.metadata.credentials
+                                  .credentialProperties.schemaSaid
+                              }
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {selectedNft.metadata.credentials.issueeId && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium min-w-fit">
+                        Issuee ID:
+                      </span>
+                      <div className="flex items-center gap-2 w-full justify-end">
+                        <span className="text-sm text-muted-foreground font-mono text-right max-w-[220px] truncate">
+                          {selectedNft.metadata.credentials.issueeId}
+                        </span>
+                        <CopyButton
+                          text={selectedNft.metadata.credentials.issueeId}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedNft.metadata.credentials.issuanceDateTime && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium min-w-fit">
+                        Issuance Date & Time:
+                      </span>
+                      <span className="text-sm text-muted-foreground text-right max-w-[220px] truncate">
+                        {new Date(
+                          selectedNft.metadata.credentials.issuanceDateTime
+                        ).toLocaleString()}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Credential Attributes */}
+                  {selectedNft.metadata.credentials.attributes &&
+                    Object.keys(selectedNft.metadata.credentials.attributes)
+                      .length > 0 && (
+                      <>
+                        <Separator />
+                        <div className="space-y-2">
+                          <h5 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+                            Attributes
+                          </h5>
+                          <div className="space-y-2">
+                            {Object.entries(
+                              selectedNft.metadata.credentials.attributes
+                            ).map(([key, value]) => (
+                              <div
+                                key={key}
+                                className="flex justify-between items-center p-2 border rounded-md"
+                              >
+                                <span className="text-sm font-medium capitalize">
+                                  {key.replace(/([A-Z])/g, " $1").trim()}:
+                                </span>
+                                <span className="text-sm text-muted-foreground font-mono">
+                                  {String(value)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
                 </div>
 
-                <Separator />
-
-                {/* Connections */}
+                {/* Connections - Only show if connections exist */}
                 {selectedNft.metadata.credentials.connections &&
-                selectedNft.metadata.credentials.connections.length > 0 ? (
-                  <div className="space-y-2">
-                    <h5 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-                      Connections
-                    </h5>
-                    <div className="space-y-2">
-                      {selectedNft.metadata.credentials.connections.map(
-                        (connection: any, index: number) => (
-                          <div
-                            key={index}
-                            className="flex items-center justify-between p-2 border rounded-md"
-                          >
-                            <div className="flex items-center gap-2">
-                              {connection.name
-                                ?.toLowerCase()
-                                .includes("github") && (
-                                <Github className="h-4 w-4" />
-                              )}
-                              {connection.name
-                                ?.toLowerCase()
-                                .includes("twitter") ||
-                              connection.name?.toLowerCase().includes("x") ? (
-                                <FaXTwitter className="h-4 w-4" />
-                              ) : null}
-                              {connection.name
-                                ?.toLowerCase()
-                                .includes("website") ||
-                              connection.name?.toLowerCase().includes("web") ? (
-                                <Globe className="h-4 w-4" />
-                              ) : null}
-                              {connection.name
-                                ?.toLowerCase()
-                                .includes("telegram") && (
-                                <FaTelegram className="h-4 w-4" />
-                              )}
-                              <div className="flex flex-col">
-                                <span className="text-sm font-medium">
-                                  {connection.name || "Unknown Connection"}
-                                </span>
-                                {connection.id && (
-                                  <span className="text-xs text-muted-foreground">
-                                    ID: {connection.id}
-                                  </span>
-                                )}
-                                {connection.linked_identifier && (
-                                  <span className="text-xs text-muted-foreground">
-                                    Linked: {connection.linked_identifier}
-                                  </span>
-                                )}
-                                {connection.timestamp && (
-                                  <span className="text-xs text-muted-foreground">
-                                    {new Date(
-                                      connection.timestamp
-                                    ).toLocaleDateString()}
-                                  </span>
+                  selectedNft.metadata.credentials.connections.length > 0 && (
+                    <>
+                      <Separator />
+                      <div className="space-y-2">
+                        <h5 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+                          Connections
+                        </h5>
+                        <div className="space-y-2">
+                          {selectedNft.metadata.credentials.connections.map(
+                            (connection: any, index: number) => (
+                              <div
+                                key={index}
+                                className="flex items-center justify-between p-2 border rounded-md"
+                              >
+                                <div className="flex items-center gap-2">
+                                  {connection.name
+                                    ?.toLowerCase()
+                                    .includes("github") && (
+                                    <Github className="h-4 w-4" />
+                                  )}
+                                  {connection.name
+                                    ?.toLowerCase()
+                                    .includes("twitter") ||
+                                  connection.name
+                                    ?.toLowerCase()
+                                    .includes("x") ? (
+                                    <FaXTwitter className="h-4 w-4" />
+                                  ) : null}
+                                  {connection.name
+                                    ?.toLowerCase()
+                                    .includes("website") ||
+                                  connection.name
+                                    ?.toLowerCase()
+                                    .includes("web") ? (
+                                    <Globe className="h-4 w-4" />
+                                  ) : null}
+                                  {connection.name
+                                    ?.toLowerCase()
+                                    .includes("telegram") && (
+                                    <FaTelegram className="h-4 w-4" />
+                                  )}
+                                  <div className="flex flex-col">
+                                    <span className="text-sm font-medium">
+                                      {connection.name || "Unknown Connection"}
+                                    </span>
+                                    {connection.id && (
+                                      <span className="text-xs text-muted-foreground">
+                                        ID: {connection.id}
+                                      </span>
+                                    )}
+                                    {connection.linked_identifier && (
+                                      <span className="text-xs text-muted-foreground">
+                                        Linked: {connection.linked_identifier}
+                                      </span>
+                                    )}
+                                    {connection.timestamp && (
+                                      <span className="text-xs text-muted-foreground">
+                                        {new Date(
+                                          connection.timestamp
+                                        ).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                {connection.url && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() =>
+                                      window.open(connection.url, "_blank")
+                                    }
+                                    className="flex items-center gap-1"
+                                  >
+                                    Visit
+                                  </Button>
                                 )}
                               </div>
-                            </div>
-                            {connection.url && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  window.open(connection.url, "_blank")
-                                }
-                                className="flex items-center gap-1"
-                              >
-                                Visit
-                              </Button>
-                            )}
-                          </div>
-                        )
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <h5 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-                      Connections
-                    </h5>
-                    <p className="text-sm text-muted-foreground">
-                      No connections found
-                    </p>
-                  </div>
-                )}
+                            )
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                 {/* Validate Button */}
-                <div className="pt-2">
+                <div className="pt-2 space-y-2">
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={async () => {
-                      if (selectedNft?.metadata?.credentials?.signature) {
-                        try {
-                          // This would call the same parseVeridianSignature API
-                          const response = await fetch(
-                            "/api/parseVeridianSignature",
-                            {
-                              method: "POST",
-                              headers: {
-                                "Content-Type": "application/json",
-                              },
-                              body: JSON.stringify({
-                                signature:
-                                  selectedNft.metadata.credentials.signature,
-                              }),
-                            }
-                          );
-
-                          if (response.ok) {
-                            const data = await response.json();
-                            alert(
-                              `Credential Status: ${
-                                data.validation?.isValid ? "Valid" : "Invalid"
-                              }\nExpires: ${
-                                data.validation?.expiresAt
-                                  ? new Date(
-                                      data.validation.expiresAt
-                                    ).toLocaleDateString()
-                                  : "Unknown"
-                              }`
-                            );
-                          } else {
-                            alert("Failed to validate credentials");
-                          }
-                        } catch (error) {
-                          console.error("Validation error:", error);
-                          alert("Error validating credentials");
-                        }
-                      }
-                    }}
-                    disabled={!selectedNft?.metadata?.credentials?.signature}
-                    className="w-full"
-                    title={
-                      selectedNft?.metadata?.credentials?.signature
-                        ? "Click to validate credentials"
-                        : "No signature found"
+                    onClick={validateCredential}
+                    disabled={
+                      isValidating ||
+                      !selectedNft?.metadata?.credentials?.credentialType
                     }
+                    className="w-full"
                   >
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    Validate Credentials
+                    {isValidating ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Validating...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Validate Credentials
+                      </>
+                    )}
                   </Button>
+
+                  {/* Validation Result */}
+                  {validationResult && (
+                    <Alert
+                      className={
+                        validationResult.isValid
+                          ? "border-green-500"
+                          : "border-red-500"
+                      }
+                    >
+                      {validationResult.isValid ? (
+                        <CheckCircle className="h-4 w-4 text-green-600" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-red-600" />
+                      )}
+                      <AlertDescription>
+                        <div className="space-y-2">
+                          <p
+                            className={`text-sm font-medium ${
+                              validationResult.isValid
+                                ? "text-green-600"
+                                : "text-red-600"
+                            }`}
+                          >
+                            {validationResult.message}
+                          </p>
+                          {validationResult.details && (
+                            <div className="text-xs text-muted-foreground space-y-1">
+                              {validationResult.details.status && (
+                                <p>
+                                  <strong>Status:</strong>{" "}
+                                  {validationResult.details.status}
+                                </p>
+                              )}
+                              {validationResult.details.issuedAt && (
+                                <p>
+                                  <strong>Issued At:</strong>{" "}
+                                  {new Date(
+                                    validationResult.details.issuedAt
+                                  ).toLocaleString()}
+                                </p>
+                              )}
+                              {validationResult.details.revokedAt && (
+                                <p>
+                                  <strong>Revoked At:</strong>{" "}
+                                  {new Date(
+                                    validationResult.details.revokedAt
+                                  ).toLocaleString()}
+                                </p>
+                              )}
+                              {validationResult.details.credentialType && (
+                                <p>
+                                  <strong>Type:</strong>{" "}
+                                  {validationResult.details.credentialType}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </AlertDescription>
+                    </Alert>
+                  )}
                 </div>
               </div>
             )}
