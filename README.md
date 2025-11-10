@@ -92,13 +92,15 @@ This application is part of a larger ecosystem of credential management tools:
 
 ## Quick Start
 
+For detailed setup instructions, see [SETUP.md](./SETUP.md).
+
 ### Prerequisites
 
 - Node.js 18 or higher
 - npm, yarn, pnpm, or bun package manager
 - Cardano wallet (Nami, Eternl, Flint, etc.) for browser wallet integration
 - Veridian wallet for CIP-45 credential functionality
-- Blockfrost API key (free tier available)
+- Blockfrost API keys for both preprod and mainnet (free tier available)
 
 ### Installation
 
@@ -112,7 +114,7 @@ npm install
 
 # Set up environment variables
 cp .env.example .env.local
-# Edit .env.local with your API keys (see SETUP.md for details)
+# Edit .env.local with your API keys (see SETUP.md for detailed instructions)
 
 # Run the development server
 npm run dev
@@ -120,9 +122,11 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) to see the application.
 
+For complete setup instructions including wallet configuration, credential setup, and troubleshooting, refer to [SETUP.md](./SETUP.md).
+
 ### Environment Variables
 
-Required environment variables (see SETUP.md for detailed instructions):
+Required environment variables (see [SETUP.md](./SETUP.md) for detailed instructions):
 
 ```bash
 # Blockfrost API Keys (required)
