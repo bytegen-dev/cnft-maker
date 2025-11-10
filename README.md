@@ -415,6 +415,7 @@ This application is a demonstration project for educational and development purp
 - [Mesh SDK Documentation](https://meshjs.dev/)
 - [CIP-45 Specification](https://github.com/cardano-foundation/CIPs/tree/master/CIP-0045)
 - [KERI Documentation](https://keri.one/)
+- [Veridian Documentation](https://docs.veridian.id/)
 - [Blockfrost API](https://blockfrost.io/)
 - [Pinata IPFS](https://pinata.cloud/)
 
