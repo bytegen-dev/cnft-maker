@@ -17,6 +17,7 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, XCircle } from "lucide-react";
 import { useState } from "react";
+import { getCredentialServerUrl } from "@/lib/utils";
 
 interface NFTDetailsDialogProps {
   isOpen: boolean;
@@ -77,9 +78,7 @@ export function NFTDetailsDialog({
 
     try {
       const credentials = selectedNft.metadata.credentials;
-      const credentialServerUrl =
-        process.env.NEXT_PUBLIC_CREDENTIAL_SERVER_URL ||
-        "https://cred-issuance.dev.idw-sandboxes.cf-deployments.org";
+      const credentialServerUrl = getCredentialServerUrl();
 
       // Check if we have the necessary data for validation
       if (!credentials.issueeId) {

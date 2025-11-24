@@ -68,6 +68,7 @@ import {
 } from "@/lib/metadata";
 import { METADATA_STANDARDS, type MetadataStandard } from "@/lib/constants";
 import { uploadToIPFS } from "@/lib/pinata";
+import { getCredentialServerUrl } from "@/lib/utils";
 import Editor from "@monaco-editor/react";
 import { NFTCard } from "./NFTCard";
 import { NFTDetailsDialog } from "./NFTDetailsDialog";
@@ -1117,9 +1118,7 @@ export default function MintingInterface() {
     aid: string,
     attributes?: Record<string, string>
   ) => {
-    const credentialServerUrl =
-      process.env.NEXT_PUBLIC_CREDENTIAL_SERVER_URL ||
-      "https://cred-issuance.dev.idw-sandboxes.cf-deployments.org";
+    const credentialServerUrl = getCredentialServerUrl();
 
     try {
       // Build request body matching credential-server-ui pattern
@@ -1169,9 +1168,7 @@ export default function MintingInterface() {
 
   // Fetch credentials for a contact (aid) - used to check if credential was presented
   const fetchContactCredentials = async (aid: string) => {
-    const credentialServerUrl =
-      process.env.NEXT_PUBLIC_CREDENTIAL_SERVER_URL ||
-      "https://cred-issuance.dev.idw-sandboxes.cf-deployments.org";
+    const credentialServerUrl = getCredentialServerUrl();
 
     try {
       const response = await fetch(

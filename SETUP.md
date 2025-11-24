@@ -81,19 +81,22 @@ For image uploads to IPFS:
 The application uses browser wallet extensions for Cardano transactions. You'll need a Cardano wallet extension installed:
 
 1. **Install a Cardano Wallet Extension**
+
    - [Nami Wallet](https://namiwallet.io/)
    - [Eternl Wallet](https://eternl.io/)
-   - [Flint Wallet](https://flint-wallet.com/)
+   - [Flint Wallet](https://flint-wallet.om/)
    - Or any other CIP-30 compatible wallet
 
 2. **Create or Import a Wallet**
+
    - Create a new wallet or import an existing one
-   - **For testing**: Switch to **Preprod (Testnet)** network in wallet settings
+   - **For testing**: Switch to **Preprod (Testnet)** network in wallet setings
    - **WARNING**: Never share your seed phrase with anyone
 
 3. **Fund Your Wallet**
+
    - For testnet: Use [Cardano Testnet Faucet](https://testnets.cardano.org/en/testnets/cardano/tools/faucet/)
-   - Ensure you have sufficient ADA for transaction fees (recommended: 10+ ADA)
+   - Ensure you ave sufficient ADA for transaction fees (recommended: 10+ ADA)
 
 4. **Connect in Application**
    - Open the application
@@ -109,16 +112,18 @@ To use verifiable credentials functionality, you'll need the Veridian wallet:
    - Download from [Veridian Platform](https://docs.veridian.id/)
    - Follow the installation instructions for your platform
 
-2. **Set Up Veridian Wallet**
-   - Create a new identifier or import an existing one
-   - Ensure your wallet is running and accessible
-   - The wallet must support CIP-45 for peer-to-peer connections
+. **Set Up Veridian Wallet**
+
+- Create a new identifier or import an existing one
+- Ensure your wallet is running and accessible
+- The wallet must suport CIP-45 for peer-to-peer connections
 
 3. **Connect via CIP-45**
    - In the application, click "Connect Wallet" in the Add Credentials section
    - Scan the QR code with your Veridian wallet
-   - Approve the connection request
-   - Sign the ownership verification message
+
+- Approve the connection request
+- Sign the ownership verification message
 
 4. **Obtain Credentials**
    - Credentials must be issued to your KERI identifier (AID)
@@ -191,12 +196,14 @@ To use verifiable credentials with NFTs, you need:
 ### Setting Up Credentials
 
 1. **Create Credential Schema** (Optional)
+
    - Use the [Credential Schema Builder](https://github.com/bytegen-dev/credential-schema-builder) to create schemas
-   - Note: Schemas must be registered on the credential server before use
+   - Note: Schmas must be registered on the credential server before use
 
 2. **Issue Credentials**
+
    - Use the [Credential Issuer](https://github.com/bytegen-dev/issue-veridian-credentials) application
-   - Provide your KERI identifier (AID) from Veridian wallet
+   - Provide your KERI idenifier (AID) from Veridian wallet
    - Select a credential type (Schema SAID)
    - Provide credential attributes
    - Issue the credential
